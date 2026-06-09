@@ -32,6 +32,10 @@ def build_card(job: dict) -> str:
     color = CATEGORY_COLORS.get(cat, "bg-gray-500")
     label = CATEGORY_LABELS.get(cat, cat)
 
+    # Descrizione (troncata a 180 char)
+    desc_raw = job.get("description", "")
+    desc = html_lib.escape(desc_raw[:180]) + ("…" if len(desc_raw) > 180 else "") if desc_raw else ""
+
     # Badge AI (mostrato solo se l'analisi è stata eseguita)
     llm_adatto = job.get("llm_adatto")
     llm_motivo = html_lib.escape(job.get("llm_motivo", ""))
@@ -69,7 +73,8 @@ def build_card(job: dict) -> str:
         f'    <h2 class="font-bold text-gray-900 text-base leading-snug">{title}</h2>\n'
         f'    <p class="text-sm text-gray-500 mt-0.5">{company}</p>\n'
         f'  </div>\n'
-        f'  <div class="flex items-center gap-2">\n'
+        + (f'  <p class="text-xs text-gray-600 leading-relaxed line-clamp-3">{desc}</p>\n' if desc else "")
+        + f'  <div class="flex items-center gap-2">\n'
         f'    <span class="inline-block bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded">CH</span>\n'
         f'    <span class="text-gray-700 font-semibold text-sm">SVIZZERA &ndash; {city}</span>\n'
         f'  </div>\n'

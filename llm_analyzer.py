@@ -34,11 +34,13 @@ def _chiedi_llm(job: dict) -> dict:
 
     client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
+    descrizione = job.get("description", "").strip()
     testo_annuncio = (
         f"Titolo: {job.get('title', '—')}\n"
         f"Azienda: {job.get('company', '—')}\n"
         f"Città: {job.get('city', '—')}\n"
-        f"Categoria: {job.get('category', '—')}"
+        f"Categoria: {job.get('category', '—')}\n"
+        + (f"Descrizione: {descrizione[:800]}" if descrizione else "")
     )
 
     try:

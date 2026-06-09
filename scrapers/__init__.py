@@ -103,6 +103,49 @@ def dismiss_cookie_dialog(page):
             pass
 
 
+def fetch_description(context: BrowserContext, url: str, max_chars: int = 1000) -> str:
+    """
+    Apre la pagina dell'annuncio e restituisce il testo della descrizione (max max_chars).
+    Ritorna stringa vuota in caso di errore.
+    """
+    if not url or not url.startswith(("https://", "http://")):
+        return ""
+    try:
+        page = new_stealth_page(context)
+        page.goto(url, wait_until="domcontentloaded", timeout=20000)
+        dismiss_cookie_dialog(page)
+        page.wait_for_timeout(1500)
+
+        # Prova selettori comuni per la descrizione
+        selectors = [
+            "[data-cy='job-description']",
+            ".job-description",
+            ".job-detail__description",
+            ".jobdescription",
+            "article",
+            "main",
+        ]
+        testo = ""
+        for sel in selectors:
+            el = page.query_selector(sel)
+            if el:
+                testo = el.inner_text()
+                if len(testo.strip()) > 100:
+                    break
+
+        # Fallback: testo del body pulito
+        if len(testo.strip()) < 100:
+            testo = page.evaluate("() => document.body.innerText")
+
+        page.close()
+        # Pulizia: rimuove righe vuote multiple e tronca
+        lines = [l.strip() for l in testo.splitlines() if l.strip()]
+        testo_pulito = " | ".join(lines)
+        return testo_pulito[:max_chars]
+    except Exception:
+        return ""
+
+
 def save_session(context: BrowserContext):
     """Persist cookies and storage state for the next run."""
     PROFILE_DIR.mkdir(exist_ok=True)
