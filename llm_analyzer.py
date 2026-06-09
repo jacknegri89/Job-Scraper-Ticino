@@ -47,25 +47,30 @@ def _chiedi_llm(job: dict) -> dict:
     try:
         risposta = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            max_tokens=250,
+            max_tokens=500,
             temperature=0,
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "Sei un consulente del lavoro italiano.\n"
-                        f"Profilo candidato:\n{PROFILO}\n"
-                        "Rispondi SOLO con JSON valido, nessun testo extra."
+                        "Sei un consulente del lavoro italiano. Rispondi SOLO con JSON valido, nessun testo extra.\n"
+                        f"Profilo candidato:\n{PROFILO}"
                     ),
                 },
                 {
                     "role": "user",
                     "content": (
-                        f"Analizza questo annuncio di lavoro:\n\n{testo_annuncio}\n\n"
-                        "Rispondi con questo JSON:\n"
-                        '{"adatto": true/false, '
-                        '"motivo": "max 10 parole sul perché è adatto o no", '
-                        '"descrizione": "2-3 frasi in italiano su cosa si fa concretamente in questo lavoro (mansioni, attività quotidiane)"}'
+                        f"Analizza questo annuncio:\n\n{testo_annuncio}\n\n"
+                        "Rispondi con questo JSON (tutti i campi obbligatori):\n"
+                        "{\n"
+                        '  "adatto": true o false,\n'
+                        '  "motivo": "max 12 parole: motivo principale per cui è adatto o non adatto",\n'
+                        '  "descrizione": "Descrizione completa in 5-7 frasi che spiega: '
+                        "(1) cosa si fa ogni giorno nel lavoro (compiti concreti), "
+                        "(2) quali competenze o esperienza sono richieste, "
+                        "(3) se Giacomo con il suo profilo specifico è in grado di farlo e perché. "
+                        'Sii diretto e preciso, evita frasi generiche."\n'
+                        "}"
                     ),
                 },
             ],
@@ -76,7 +81,7 @@ def _chiedi_llm(job: dict) -> dict:
         result = json.loads(contenuto)
         job["llm_adatto"]      = bool(result.get("adatto", True))
         job["llm_motivo"]      = str(result.get("motivo", ""))[:120]
-        job["llm_descrizione"] = str(result.get("descrizione", ""))[:500]
+        job["llm_descrizione"] = str(result.get("descrizione", ""))[:1000]
     except Exception as e:
         # In caso di errore mantiene l'annuncio visibile senza nota AI
         job["llm_adatto"]      = True

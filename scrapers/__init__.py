@@ -105,7 +105,7 @@ def dismiss_cookie_dialog(page):
             pass
 
 
-def fetch_description(context: BrowserContext, url: str, max_chars: int = 1000) -> str:
+def fetch_description(context: BrowserContext, url: str, max_chars: int = 3000) -> str:
     """
     Apre la pagina dell'annuncio e restituisce il testo della descrizione (max max_chars).
     Ritorna stringa vuota in caso di errore.

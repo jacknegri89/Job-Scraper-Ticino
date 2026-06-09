@@ -82,8 +82,8 @@ def build_card(job: dict) -> str:
         ai_html = ""
 
     desc_block = (
-        f'<p style="color:#9ca3af;font-size:13px;line-height:1.6" '
-        f'class="line-clamp-4">{desc}</p>\n'
+        f'<p style="color:#c9d1d9;font-size:13px;line-height:1.7;'
+        f'border-left:3px solid #30363d;padding-left:12px">{desc}</p>\n'
         if desc else ""
     )
 
@@ -190,8 +190,6 @@ def generate_html(jobs: list, output_path: str = "index.html"):
                        box-shadow: 0 12px 40px rgba(0,0,0,.55);
                        border-color: #6e7681 !important; }}
     .filter-btn:hover {{ opacity: .85; }}
-    .line-clamp-4 {{ display: -webkit-box; -webkit-line-clamp: 4;
-                     -webkit-box-orient: vertical; overflow: hidden; }}
   </style>
 </head>
 <body>
