@@ -5,6 +5,7 @@ from scrapers import create_browser_context, save_session, fetch_description
 from scrapers.jobs_ch import scrape_jobs_ch
 from scrapers.carriera_ch import scrape_carriera_ch
 from scrapers.gigroup_ch import scrape_gigroup_ch
+from scrapers.randstad_ch import scrape_randstad_ch
 from filters import filter_jobs
 from html_generator import generate_html
 from llm_analyzer import analyze_jobs
@@ -27,6 +28,9 @@ def main():
 
             print("\n=== GI GROUP CH ===")
             raw_jobs.extend(scrape_gigroup_ch(context))
+
+            print("\n=== RANDSTAD CH ===")
+            raw_jobs.extend(scrape_randstad_ch(context))
 
             valid = filter_jobs(raw_jobs)
             print(f"\n[FILTER] {len(raw_jobs)} grezzi → {len(valid)} validi")

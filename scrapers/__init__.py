@@ -91,6 +91,8 @@ def dismiss_cookie_dialog(page):
         'button:has-text("Nega il consenso")',
         'button:has-text("Reject all")',
         'button:has-text("Rifiuta tutto")',
+        'button:has-text("rifiuta tutti")',   # Randstad
+        'button:has-text("Rifiuta tutti")',   # variante maiuscola
     ]
     for sel in selectors:
         try:
