@@ -1,5 +1,5 @@
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, retry
-from filters import KEYWORDS, categorize_job
+from filters import SEARCH_TERMS, categorize_job
 import urllib.parse
 
 BASE_URL   = "https://www.jobs.ch"
@@ -39,35 +39,34 @@ def _extract_jobs_from_page(page, category: str) -> list:
 
 
 @retry(max_attempts=3)
-def scrape_jobs_ch(context, keywords_dict: dict = None) -> list:
-    if keywords_dict is None:
-        keywords_dict = KEYWORDS
+def scrape_jobs_ch(context, search_terms: list = None) -> list:
+    if search_terms is None:
+        search_terms = SEARCH_TERMS
 
     all_jobs = []
     page = new_stealth_page(context)
 
-    for category, keywords in keywords_dict.items():
-        for keyword in keywords:
-            print(f"[jobs.ch] '{keyword}' ({category})")
-            for page_num in range(1, MAX_PAGES + 1):
-                url = SEARCH_URL.format(term=urllib.parse.quote_plus(keyword), page=page_num)
-                try:
-                    page.goto(url, timeout=30_000, wait_until="domcontentloaded")
-                    page.wait_for_timeout(2000)
-                    dismiss_cookie_dialog(page)
-                    human_scroll(page)
-                    human_delay(3.0, 7.0)
+    for term in search_terms:
+        print(f"[jobs.ch] Cerco: '{term}'")
+        for page_num in range(1, MAX_PAGES + 1):
+            url = SEARCH_URL.format(term=urllib.parse.quote_plus(term), page=page_num)
+            try:
+                page.goto(url, timeout=30_000, wait_until="domcontentloaded")
+                page.wait_for_timeout(2000)
+                dismiss_cookie_dialog(page)
+                human_scroll(page)
+                human_delay(3.0, 7.0)
 
-                    jobs = _extract_jobs_from_page(page, category)
-                    if not jobs:
-                        break
-                    all_jobs.extend(jobs)
-                    print(f"  pag.{page_num}: {len(jobs)} annunci")
-                    if len(jobs) < 20:
-                        break
-                except Exception as e:
-                    print(f"[WARN] {url}: {e}")
+                jobs = _extract_jobs_from_page(page, "")
+                if not jobs:
                     break
+                all_jobs.extend(jobs)
+                print(f"  pag.{page_num}: {len(jobs)} annunci")
+                if len(jobs) < 20:
+                    break
+            except Exception as e:
+                print(f"[WARN] {url}: {e}")
+                break
 
     page.close()
     print(f"[jobs.ch] Totale grezzo: {len(all_jobs)}")

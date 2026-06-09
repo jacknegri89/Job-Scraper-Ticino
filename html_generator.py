@@ -3,19 +3,25 @@ from datetime import datetime
 from pathlib import Path
 
 CATEGORY_COLORS = {
-    "tech":      "bg-blue-600",
-    "logistica": "bg-green-600",
-    "pulizie":   "bg-yellow-500",
-    "retail":    "bg-orange-500",
-    "altro":     "bg-gray-500",
+    "tech":        "bg-blue-600",
+    "logistica":   "bg-green-600",
+    "produzione":  "bg-teal-600",
+    "ristorazione":"bg-pink-500",
+    "pulizie":     "bg-yellow-500",
+    "retail":      "bg-orange-500",
+    "trasporti":   "bg-purple-600",
+    "altro":       "bg-gray-500",
 }
 
 CATEGORY_LABELS = {
-    "tech":      "Tech/IT",
-    "logistica": "Logistica",
-    "pulizie":   "Pulizie",
-    "retail":    "Retail",
-    "altro":     "Altro",
+    "tech":        "Tech/IT",
+    "logistica":   "Logistica",
+    "produzione":  "Produzione",
+    "ristorazione":"Ristorazione",
+    "pulizie":     "Pulizie",
+    "retail":      "Retail",
+    "trasporti":   "Trasporti",
+    "altro":       "Altro",
 }
 
 
@@ -128,13 +134,16 @@ def generate_html(jobs: list, output_path: str = "index.html"):
         f'    <span class="bg-blue-600 text-white px-4 py-2 rounded-full font-bold text-base">{count_label}</span>\n'
         "  </div>\n"
         '  <div class="max-w-7xl mx-auto px-4 pb-3 flex flex-wrap gap-2">\n'
-        '    <button onclick="filterJobs(\'all\')"       id="btn-all"       class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-800 text-white">Tutti</button>\n'
-        '    <button onclick="filterJobs(\'tech\')"      id="btn-tech"      class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300">Tech/IT</button>\n'
-        '    <button onclick="filterJobs(\'logistica\')" id="btn-logistica" class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300">Logistica</button>\n'
-        '    <button onclick="filterJobs(\'pulizie\')"   id="btn-pulizie"   class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300">Pulizie</button>\n'
-        '    <button onclick="filterJobs(\'retail\')"    id="btn-retail"    class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300">Retail</button>\n'
-        '    <button onclick="filterJobs(\'altro\')"     id="btn-altro"     class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300">Altro</button>\n'
-        '    <button onclick="filterAI(\'adatto\')"     id="btn-adatto"    class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-green-600 text-white hover:bg-green-700">&#10003; Solo adatti AI</button>\n'
+        '    <button onclick="filterJobs(\'all\')"          id="btn-all"          class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-800 text-white">Tutti</button>\n'
+        '    <button onclick="filterJobs(\'tech\')"         id="btn-tech"         class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300">Tech/IT</button>\n'
+        '    <button onclick="filterJobs(\'logistica\')"    id="btn-logistica"    class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300">Logistica</button>\n'
+        '    <button onclick="filterJobs(\'produzione\')"   id="btn-produzione"   class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300">Produzione</button>\n'
+        '    <button onclick="filterJobs(\'ristorazione\')" id="btn-ristorazione" class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300">Ristorazione</button>\n'
+        '    <button onclick="filterJobs(\'pulizie\')"      id="btn-pulizie"      class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300">Pulizie</button>\n'
+        '    <button onclick="filterJobs(\'retail\')"       id="btn-retail"       class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300">Retail</button>\n'
+        '    <button onclick="filterJobs(\'trasporti\')"    id="btn-trasporti"    class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300">Trasporti</button>\n'
+        '    <button onclick="filterJobs(\'altro\')"        id="btn-altro"        class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300">Altro</button>\n'
+        '    <button onclick="filterAI(\'adatto\')"         id="btn-adatto"       class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-green-600 text-white hover:bg-green-700">&#10003; Solo adatti AI</button>\n'
         "  </div>\n"
         "</header>\n\n"
         '<main class="max-w-7xl mx-auto px-4 py-6">\n'
