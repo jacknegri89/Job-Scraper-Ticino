@@ -3,8 +3,9 @@ Analisi AI degli annunci di lavoro tramite Groq (Llama 3.3 70B) — completament
 
 Richiede la variabile d'ambiente GROQ_API_KEY impostata.
 Aggiunge a ogni annuncio i campi:
-  - llm_adatto  (bool)  : True se il lavoro è adatto al profilo
-  - llm_motivo  (str)   : breve spiegazione (max ~10 parole)
+  - llm_adatto     (bool) : True se il lavoro è adatto al profilo
+  - llm_motivo     (str)  : breve spiegazione (max ~10 parole)
+  - llm_descrizione (str) : 2-3 frasi su cosa si fa concretamente nel lavoro
 """
 
 import os
@@ -46,7 +47,7 @@ def _chiedi_llm(job: dict) -> dict:
     try:
         risposta = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            max_tokens=80,
+            max_tokens=250,
             temperature=0,
             messages=[
                 {
@@ -60,8 +61,11 @@ def _chiedi_llm(job: dict) -> dict:
                 {
                     "role": "user",
                     "content": (
-                        f"Questo annuncio è adatto al candidato?\n\n{testo_annuncio}\n\n"
-                        'Rispondi con: {"adatto": true/false, "motivo": "max 10 parole in italiano"}'
+                        f"Analizza questo annuncio di lavoro:\n\n{testo_annuncio}\n\n"
+                        "Rispondi con questo JSON:\n"
+                        '{"adatto": true/false, '
+                        '"motivo": "max 10 parole sul perché è adatto o no", '
+                        '"descrizione": "2-3 frasi in italiano su cosa si fa concretamente in questo lavoro (mansioni, attività quotidiane)"}'
                     ),
                 },
             ],
@@ -70,12 +74,14 @@ def _chiedi_llm(job: dict) -> dict:
         # Rimuove eventuali backtick markdown
         contenuto = contenuto.strip("`").lstrip("json").strip()
         result = json.loads(contenuto)
-        job["llm_adatto"] = bool(result.get("adatto", True))
-        job["llm_motivo"] = str(result.get("motivo", ""))[:120]
+        job["llm_adatto"]      = bool(result.get("adatto", True))
+        job["llm_motivo"]      = str(result.get("motivo", ""))[:120]
+        job["llm_descrizione"] = str(result.get("descrizione", ""))[:500]
     except Exception as e:
         # In caso di errore mantiene l'annuncio visibile senza nota AI
-        job["llm_adatto"] = True
-        job["llm_motivo"] = ""
+        job["llm_adatto"]      = True
+        job["llm_motivo"]      = ""
+        job["llm_descrizione"] = ""
 
     return job
 

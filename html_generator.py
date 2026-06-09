@@ -38,9 +38,18 @@ def build_card(job: dict) -> str:
     color = CATEGORY_COLORS.get(cat, "bg-gray-500")
     label = CATEGORY_LABELS.get(cat, cat)
 
-    # Descrizione (troncata a 180 char)
-    desc_raw = job.get("description", "")
-    desc = html_lib.escape(desc_raw[:180]) + ("…" if len(desc_raw) > 180 else "") if desc_raw else ""
+    # Descrizione: preferisce quella generata dal LLM (leggibile),
+    # cade back sul testo grezzo raschiato solo se l'LLM non è disponibile.
+    llm_desc = job.get("llm_descrizione", "").strip()
+    raw_desc  = job.get("description", "").strip()
+    if llm_desc:
+        desc = html_lib.escape(llm_desc)
+    elif raw_desc:
+        # Testo grezzo: pulisce i separatori " | " e tronca
+        cleaned = raw_desc.replace(" | ", " ").strip()
+        desc = html_lib.escape(cleaned[:300]) + ("…" if len(cleaned) > 300 else "")
+    else:
+        desc = ""
 
     # Badge AI (mostrato solo se l'analisi è stata eseguita)
     llm_adatto = job.get("llm_adatto")
@@ -79,7 +88,7 @@ def build_card(job: dict) -> str:
         f'    <h2 class="font-bold text-gray-900 text-base leading-snug">{title}</h2>\n'
         f'    <p class="text-sm text-gray-500 mt-0.5">{company}</p>\n'
         f'  </div>\n'
-        + (f'  <p class="text-xs text-gray-600 leading-relaxed line-clamp-3">{desc}</p>\n' if desc else "")
+        + (f'  <p class="text-sm text-gray-600 leading-relaxed line-clamp-4">{desc}</p>\n' if desc else "")
         + f'  <div class="flex items-center gap-2">\n'
         f'    <span class="inline-block bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded">CH</span>\n'
         f'    <span class="text-gray-700 font-semibold text-sm">SVIZZERA &ndash; {city}</span>\n'
