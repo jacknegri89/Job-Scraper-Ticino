@@ -1,7 +1,7 @@
 """
-Analisi AI degli annunci di lavoro tramite OpenAI gpt-4o-mini.
+Analisi AI degli annunci di lavoro tramite Groq (Llama 3.3 70B) — completamente gratuito.
 
-Richiede la variabile d'ambiente OPENAI_API_KEY impostata.
+Richiede la variabile d'ambiente GROQ_API_KEY impostata.
 Aggiunge a ogni annuncio i campi:
   - llm_adatto  (bool)  : True se il lavoro è adatto al profilo
   - llm_motivo  (str)   : breve spiegazione (max ~10 parole)
@@ -21,10 +21,10 @@ NON adatto: lavori che richiedono anni di esperienza, laurea specialistica, resi
 
 
 def _chiedi_llm(job: dict) -> dict:
-    """Chiama OpenAI e restituisce il job arricchito con llm_adatto e llm_motivo."""
-    from openai import OpenAI
+    """Chiama Groq (Llama 3.3 70B) e restituisce il job arricchito."""
+    from groq import Groq
 
-    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
     testo_annuncio = (
         f"Titolo: {job.get('title', '—')}\n"
@@ -35,7 +35,7 @@ def _chiedi_llm(job: dict) -> dict:
 
     try:
         risposta = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="llama-3.3-70b-versatile",
             max_tokens=80,
             temperature=0,
             messages=[
@@ -72,17 +72,17 @@ def _chiedi_llm(job: dict) -> dict:
 
 def analyze_jobs(jobs: list) -> list:
     """
-    Analizza la lista di annunci con GPT-4o-mini.
-    Se OPENAI_API_KEY non è impostata, restituisce la lista invariata.
+    Analizza la lista di annunci con Llama 3.3 70B su Groq (gratuito).
+    Se GROQ_API_KEY non è impostata, restituisce la lista invariata.
     """
-    if not os.environ.get("OPENAI_API_KEY"):
-        print("[LLM] OPENAI_API_KEY non trovata — analisi AI saltata.")
+    if not os.environ.get("GROQ_API_KEY"):
+        print("[LLM] GROQ_API_KEY non trovata — analisi AI saltata.")
         return jobs
 
     if not jobs:
         return jobs
 
-    print(f"[LLM] Analisi AI di {len(jobs)} annunci con gpt-4o-mini…")
+    print(f"[LLM] Analisi AI di {len(jobs)} annunci con Llama 3.3 70B (Groq)…")
 
     analizzati = []
     for i, job in enumerate(jobs, start=1):
