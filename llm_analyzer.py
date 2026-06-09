@@ -11,12 +11,20 @@ import os
 import json
 
 PROFILO = """
-Candidato: Giacomo Negri, 20 anni.
-Titolo di studio: diploma IT (istituto Jean Monnet, giugno 2026) — primo impiego.
-Tipo di lavoro cercato: frontaliero in Ticino (Svizzera), Mendrisiotto.
-Competenze: informatica di base (diploma tecnico), nessuna esperienza lavorativa significativa.
-Disponibile per: tech/IT junior, logistica, pulizie, retail, lavori manuali generici.
-NON adatto: lavori che richiedono anni di esperienza, laurea specialistica, residenza svizzera obbligatoria.
+Candidato: Giacomo Negri, 20 anni, Barlassina (MB), Italia.
+Titolo di studio: diploma in Informatica e Telecomunicazioni (maturità giugno 2026, istituto Jean Monnet) — primo impiego.
+Tipo di lavoro: qualsiasi settore, full time, frontaliero in Ticino (Svizzera). Vuole lavorare in Svizzera per il buon stipendio.
+Distanza massima: 35-40 minuti di auto da Barlassina (MB). Ha patente e macchina propria.
+Lingue: italiano madrelingua, inglese B1/B2.
+Esperienza: 1 mese di stage (PCTO) presso TCR Tecora Srl (Cogliate, MB) — azienda di monitoraggio ambientale:
+  - Progetto IoT: sistema controllo umidità con Raspberry Pi 3B+, programmazione in C su Linux (Raspbian)
+  - Assemblaggio hardware: saldatura professionale, crimpatura cavi, test con multimetro
+  - Assistenza post-vendita: diagnosi guasti, sostituzione componenti elettronici
+  - Logistica/spedizioni: imballaggio, pallet in legno, etichettatura consegne internazionali
+Hard skills: C, Linux, IoT, Raspberry Pi, saldatura, assemblaggio elettronico, multimetro.
+Soft skills: teamwork, autonomia, gestione del tempo.
+Disponibile per: QUALSIASI lavoro (IT, logistica, magazzino, pulizie, retail, produzione, assemblaggio, cablaggio, ecc.)
+NON adatto SOLO se: richiede laurea magistrale/specialistica, oppure richiede residenza svizzera obbligatoria (permesso C/B richiesto espressamente), oppure richiede 3+ anni di esperienza specifica.
 """
 
 
