@@ -58,9 +58,9 @@ def create_browser_context(playwright: Playwright) -> tuple:
 
 def new_stealth_page(context: BrowserContext):
     """Create a page with playwright-stealth patches applied."""
-    from playwright_stealth import stealth_sync
+    from playwright_stealth import Stealth
     page = context.new_page()
-    stealth_sync(page)
+    Stealth().apply_stealth_sync(page)
     return page
 
 

@@ -32,9 +32,34 @@ def build_card(job: dict) -> str:
     color = CATEGORY_COLORS.get(cat, "bg-gray-500")
     label = CATEGORY_LABELS.get(cat, cat)
 
+    # Badge AI (mostrato solo se l'analisi è stata eseguita)
+    llm_adatto = job.get("llm_adatto")
+    llm_motivo = html_lib.escape(job.get("llm_motivo", ""))
+    ai_badge = ""
+    ai_filter = "none"  # valore data-ai per il filtro JS
+    if llm_adatto is True:
+        ai_badge = (
+            f'  <div class="flex items-center gap-1.5 bg-green-50 border border-green-200'
+            f' rounded-lg px-2 py-1">\n'
+            f'    <span class="text-green-600 font-bold text-xs">✓ Adatto</span>\n'
+            f'    <span class="text-green-700 text-xs">{llm_motivo}</span>\n'
+            f'  </div>\n'
+        )
+        ai_filter = "adatto"
+    elif llm_adatto is False:
+        ai_badge = (
+            f'  <div class="flex items-center gap-1.5 bg-red-50 border border-red-200'
+            f' rounded-lg px-2 py-1">\n'
+            f'    <span class="text-red-500 font-bold text-xs">✗ Non adatto</span>\n'
+            f'    <span class="text-red-600 text-xs">{llm_motivo}</span>\n'
+            f'  </div>\n'
+        )
+        ai_filter = "non_adatto"
+
     return (
         f'<div class="job-card bg-white rounded-xl shadow-sm p-4 flex flex-col gap-3'
-        f' hover:shadow-md transition-shadow" data-category="{html_lib.escape(cat)}">\n'
+        f' hover:shadow-md transition-shadow" data-category="{html_lib.escape(cat)}"'
+        f' data-ai="{ai_filter}">\n'
         f'  <div class="flex items-start justify-between gap-2">\n'
         f'    <span class="{color} text-white text-xs font-bold px-2 py-0.5 rounded-full'
         f' uppercase tracking-wide">{label}</span>\n'
@@ -48,6 +73,7 @@ def build_card(job: dict) -> str:
         f'    <span class="inline-block bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded">CH</span>\n'
         f'    <span class="text-gray-700 font-semibold text-sm">SVIZZERA &ndash; {city}</span>\n'
         f'  </div>\n'
+        f'{ai_badge}'
         f'  <p class="text-xs text-gray-400">{date}</p>\n'
         f'  <a href="{url}" target="_blank" rel="noopener noreferrer"\n'
         f'     class="mt-auto w-full bg-blue-600 hover:bg-blue-700 text-white text-center'
@@ -103,6 +129,7 @@ def generate_html(jobs: list, output_path: str = "index.html"):
         '    <button onclick="filterJobs(\'pulizie\')"   id="btn-pulizie"   class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300">Pulizie</button>\n'
         '    <button onclick="filterJobs(\'retail\')"    id="btn-retail"    class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300">Retail</button>\n'
         '    <button onclick="filterJobs(\'altro\')"     id="btn-altro"     class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300">Altro</button>\n'
+        '    <button onclick="filterAI(\'adatto\')"     id="btn-adatto"    class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-green-600 text-white hover:bg-green-700">&#10003; Solo adatti AI</button>\n'
         "  </div>\n"
         "</header>\n\n"
         '<main class="max-w-7xl mx-auto px-4 py-6">\n'
@@ -121,6 +148,20 @@ def generate_html(jobs: list, output_path: str = "index.html"):
         "    if (active) {\n"
         "      active.classList.remove('bg-gray-200', 'text-gray-700');\n"
         "      active.classList.add('bg-gray-800', 'text-white');\n"
+        "    }\n"
+        "  }\n"
+        "  function filterAI(value) {\n"
+        "    document.querySelectorAll('.job-card').forEach(card => {\n"
+        "      card.style.display = (card.dataset.ai === value) ? '' : 'none';\n"
+        "    });\n"
+        "    document.querySelectorAll('.filter-btn').forEach(btn => {\n"
+        "      btn.classList.remove('bg-gray-800', 'text-white');\n"
+        "      btn.classList.add('bg-gray-200', 'text-gray-700');\n"
+        "    });\n"
+        "    const active = document.getElementById('btn-adatto');\n"
+        "    if (active) {\n"
+        "      active.classList.remove('bg-gray-200', 'text-gray-700');\n"
+        "      active.classList.add('bg-green-600', 'text-white');\n"
         "    }\n"
         "  }\n"
         "</script>\n\n"

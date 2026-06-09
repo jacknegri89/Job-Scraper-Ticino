@@ -6,24 +6,7 @@ from scrapers.jobs_ch import scrape_jobs_ch
 from scrapers.carriera_ch import scrape_carriera_ch
 from filters import filter_jobs
 from html_generator import generate_html
-
-# ─── Hook LLM opzionale (commentato) ─────────────────────────────────────────
-# Per attivarlo in futuro: pip install anthropic
-# Imposta la variabile d'ambiente: ANTHROPIC_API_KEY=sk-ant-...
-#
-# def analyze_with_llm(job_text: str) -> dict:
-#     import anthropic, json
-#     client = anthropic.Anthropic()
-#     msg = client.messages.create(
-#         model="claude-sonnet-4-6",
-#         max_tokens=256,
-#         messages=[{"role": "user", "content": (
-#             "Analizza questo annuncio di lavoro svizzero. Rispondi SOLO in JSON:\n"
-#             '{"stipendio": "...", "esclusi_frontalieri": true/false}\n\n' + job_text
-#         )}],
-#     )
-#     return json.loads(msg.content[0].text)
-# ─────────────────────────────────────────────────────────────────────────────
+from llm_analyzer import analyze_jobs
 
 
 def main():
@@ -48,6 +31,8 @@ def main():
 
     valid = filter_jobs(raw_jobs)
     print(f"\n[FILTER] {len(raw_jobs)} grezzi → {len(valid)} validi")
+
+    valid = analyze_jobs(valid)
 
     generate_html(valid)
 
