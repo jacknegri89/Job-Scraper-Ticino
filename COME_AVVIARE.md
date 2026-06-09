@@ -3,7 +3,9 @@
 ## Primo avvio (una volta sola)
 
 1. Apri il Prompt dei Comandi nella cartella `Lavoro`:
-   - Tasto destro sulla cartella -> "Apri nel terminale"
+   - Windows 11: tasto destro sulla cartella → "Apri nel terminale"
+   - Windows 10: Shift + tasto destro sulla cartella → "Apri finestra di comando qui"
+   - In alternativa: Start → digita "cmd" → `cd "C:\Users\...\Desktop\Lavoro"`
 
 2. Installa le dipendenze:
    ```
