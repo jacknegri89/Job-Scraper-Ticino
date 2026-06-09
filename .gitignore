@@ -1,0 +1,6 @@
+profile/state.json
+__pycache__/
+*.pyc
+.pytest_cache/
+index.html
+.playwright-mcp/
