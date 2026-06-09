@@ -57,7 +57,10 @@ def filter_jobs(jobs: list) -> list:
     valid = [j for j in jobs if is_valid_job(j)]
     seen, deduped = set(), []
     for job in valid:
-        key = normalize_url(job["url"])
+        url = job.get("url", "")
+        if not url:
+            continue
+        key = normalize_url(url)
         if key not in seen:
             seen.add(key)
             deduped.append(job)
