@@ -24,7 +24,8 @@ def build_card(job: dict) -> str:
     company = html_lib.escape(job.get("company", ""))
     city    = html_lib.escape(job.get("city",    ""))
     date    = html_lib.escape(job.get("date",    ""))
-    url     = html_lib.escape(job.get("url",     "#"))
+    raw_url = job.get("url", "#")
+    url     = html_lib.escape(raw_url if raw_url.startswith(("https://", "http://")) else "#")
     source  = html_lib.escape(job.get("source",  ""))
     cat     = job.get("category", "altro")
 
@@ -33,7 +34,7 @@ def build_card(job: dict) -> str:
 
     return (
         f'<div class="job-card bg-white rounded-xl shadow-sm p-4 flex flex-col gap-3'
-        f' hover:shadow-md transition-shadow" data-category="{cat}">\n'
+        f' hover:shadow-md transition-shadow" data-category="{html_lib.escape(cat)}">\n'
         f'  <div class="flex items-start justify-between gap-2">\n'
         f'    <span class="{color} text-white text-xs font-bold px-2 py-0.5 rounded-full'
         f' uppercase tracking-wide">{label}</span>\n'
