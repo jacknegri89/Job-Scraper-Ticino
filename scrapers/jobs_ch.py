@@ -1,5 +1,6 @@
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, retry
-from filters import KEYWORDS
+from filters import KEYWORDS, categorize_job
+import urllib.parse
 
 BASE_URL   = "https://www.jobs.ch"
 SEARCH_URL = "https://www.jobs.ch/en/vacancies/?term={term}&location=ticino&page={page}"
@@ -29,7 +30,7 @@ def _extract_jobs_from_page(page, category: str) -> list:
                     "city":     city_text,
                     "date":     date_text,
                     "url":      url,
-                    "category": category,
+                    "category": categorize_job(title),
                     "source":   "jobs.ch",
                 })
         except Exception as e:
@@ -49,7 +50,7 @@ def scrape_jobs_ch(context, keywords_dict: dict = None) -> list:
         for keyword in keywords:
             print(f"[jobs.ch] '{keyword}' ({category})")
             for page_num in range(1, MAX_PAGES + 1):
-                url = SEARCH_URL.format(term=keyword.replace(" ", "+"), page=page_num)
+                url = SEARCH_URL.format(term=urllib.parse.quote_plus(keyword), page=page_num)
                 try:
                     page.goto(url, timeout=30_000, wait_until="domcontentloaded")
                     page.wait_for_timeout(2000)

@@ -51,7 +51,7 @@ def main():
 
     generate_html(valid)
 
-    elapsed = (datetime.now() - start).seconds
+    elapsed = int((datetime.now() - start).total_seconds())
     print(f"[DONE] Completato in {elapsed}s. Apri index.html nel browser.")
 
 
