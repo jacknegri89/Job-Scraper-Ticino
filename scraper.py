@@ -4,6 +4,7 @@ from playwright.sync_api import sync_playwright
 from scrapers import create_browser_context, save_session, fetch_description
 from scrapers.jobs_ch import scrape_jobs_ch
 from scrapers.carriera_ch import scrape_carriera_ch
+from scrapers.gigroup_ch import scrape_gigroup_ch
 from filters import filter_jobs
 from html_generator import generate_html
 from llm_analyzer import analyze_jobs
@@ -23,6 +24,9 @@ def main():
 
             print("\n=== CARRIERA.CH ===")
             raw_jobs.extend(scrape_carriera_ch(context))
+
+            print("\n=== GI GROUP CH ===")
+            raw_jobs.extend(scrape_gigroup_ch(context))
 
             valid = filter_jobs(raw_jobs)
             print(f"\n[FILTER] {len(raw_jobs)} grezzi → {len(valid)} validi")
