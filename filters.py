@@ -1,3 +1,4 @@
+import re
 from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
 
 COMUNI_AMMESSI = {
@@ -95,7 +96,13 @@ KEYWORDS = {
 
 def normalize_city(city_raw: str) -> str:
     if " - " in city_raw:
-        return city_raw.split(" - ")[-1].strip().lower()
+        city_raw = city_raw.split(" - ")[-1].strip()
+    # Strip canton/region suffixes: "Chiasso, TI" → "Chiasso", "Chiasso (TI)" → "Chiasso"
+    city_raw = re.split(r'[,\(]', city_raw)[0].strip()
+    # CAP svizzero iniziale: "6850 Chiasso" → "Chiasso"
+    city_raw = re.sub(r'^\d{4,5}\s+', '', city_raw)
+    # Sigla cantone in coda senza virgola: "Chiasso TI" / "Stabio CH" → nome pulito
+    city_raw = re.sub(r'\s+(?:TI|CH)$', '', city_raw, flags=re.IGNORECASE)
     return city_raw.strip().lower()
 
 
@@ -103,15 +110,19 @@ def normalize_url(url: str) -> str:
     parsed = urlparse(url)
     params = parse_qs(parsed.query, keep_blank_values=False)
     clean = {k: v for k, v in params.items() if not k.startswith("utm_")}
-    return urlunparse(parsed._replace(query=urlencode(clean, doseq=True)))
+    return urlunparse(parsed._replace(query=urlencode(sorted(clean.items()), doseq=True)))
+
+
+def _su_portale_italiano(url: str) -> bool:
+    """Gli annunci su domini .it sono lavori in Italia, non frontalierato."""
+    return urlparse(url).netloc.endswith(".it")
 
 
 def is_valid_job(job: dict) -> bool:
-    city = normalize_city(job.get("city", ""))
-    url = job.get("url", "")
-    if urlparse(url).netloc.endswith(".it"):
+    """Vero se l'annuncio è in un comune ammesso e non su un portale italiano."""
+    if _su_portale_italiano(job.get("url", "")):
         return False
-    return city in COMUNI_AMMESSI
+    return normalize_city(job.get("city", "")) in COMUNI_AMMESSI
 
 
 def categorize_job(title: str) -> str:
@@ -123,15 +134,57 @@ def categorize_job(title: str) -> str:
     return "altro"
 
 
+# Agenzie di somministrazione: il nome azienda è sempre identico,
+# quindi title+company+city deduplica per errore posizioni genuinamente diverse.
+# Per queste sorgenti si aggiunge un frammento dell'URL per distinguerle.
+_AGENZIE = {"randstad.ch", "orienta.ch", "gigroup.ch", "adecco.ch", "manpower.ch"}
+
+
+def _content_key(job: dict) -> str:
+    """Chiave per dedup cross-portale (stesso annuncio su jobs.ch e jobscout24.ch)."""
+    t    = re.sub(r'\W+', '', job.get("title",   "")).lower()[:40]
+    c    = re.sub(r'\W+', '', job.get("company", "")).lower()[:25]
+    city = normalize_city(job.get("city", ""))
+    # Per agenzie: aggiungi i ~20 caratteri finali dell'URL (slug/UUID univoco)
+    if job.get("source") in _AGENZIE:
+        url_tail = re.sub(r'\W+', '', job.get("url", ""))[-18:]
+        return f"{t}|{c}|{city}|{url_tail}"
+    return f"{t}|{c}|{city}"
+
+
 def filter_jobs(jobs: list) -> list:
     valid = [j for j in jobs if is_valid_job(j)]
-    seen, deduped = set(), []
+    seen_url     = set()
+    seen_content = set()
+    deduped      = []
     for job in valid:
         url = job.get("url", "")
         if not url:
             continue
-        key = normalize_url(url)
-        if key not in seen:
-            seen.add(key)
-            deduped.append(job)
-    return sorted(deduped, key=lambda j: j.get("date", ""), reverse=True)
+        url_key     = normalize_url(url)
+        content_key = _content_key(job)
+        if url_key in seen_url or content_key in seen_content:
+            continue
+        seen_url.add(url_key)
+        seen_content.add(content_key)
+        deduped.append(job)
+    return sorted(deduped, key=_sort_date, reverse=True)
+
+
+_ISO_DATE = re.compile(r'^\d{4}-\d{2}-\d{2}')
+_EU_DATE  = re.compile(r'^(\d{1,2})\.(\d{1,2})\.(\d{4})')
+
+
+def _sort_date(job: dict) -> str:
+    """
+    Chiave di ordinamento tollerante: le date sono in formati misti tra portali.
+    ISO (YYYY-MM-DD) ordina correttamente; DD.MM.YYYY viene convertito;
+    tutto il resto (testo grezzo) finisce in fondo.
+    """
+    d = job.get("date", "").strip()
+    if _ISO_DATE.match(d):
+        return d[:10]
+    m = _EU_DATE.match(d)
+    if m:
+        return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+    return ""

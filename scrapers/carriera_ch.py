@@ -2,7 +2,7 @@ from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie
 from filters import categorize_job
 
 LIST_URL  = "https://www.carriera.ch/offerte/annunci-offerte-lavoro_0_0_{page}.html"
-MAX_PAGES = 5
+MAX_PAGES = 50  # limite di sicurezza; si ferma prima quando una pagina non porta nuovi annunci
 
 
 def _extract_jobs_from_page(page) -> list:
@@ -42,31 +42,37 @@ def _extract_jobs_from_page(page) -> list:
     return jobs
 
 
-@retry(max_attempts=3)
+@retry()
 def scrape_carriera_ch(context) -> list:
-    all_jobs = []
+    all_jobs  = []
+    seen_urls = set()
     page = new_stealth_page(context)
+    try:
+        for page_num in range(MAX_PAGES):
+            url = LIST_URL.format(page=page_num)
+            print(f"[carriera.ch] Pagina {page_num + 1}")
+            try:
+                page.goto(url, timeout=30_000, wait_until="domcontentloaded")
+                page.wait_for_timeout(2000)
+                dismiss_cookie_dialog(page)
+                human_scroll(page)
+                human_delay(3.0, 7.0)
 
-    for page_num in range(MAX_PAGES):
-        url = LIST_URL.format(page=page_num)
-        print(f"[carriera.ch] Pagina {page_num + 1}/{MAX_PAGES}")
-        try:
-            page.goto(url, timeout=30_000, wait_until="domcontentloaded")
-            page.wait_for_timeout(2000)
-            dismiss_cookie_dialog(page)
-            human_scroll(page)
-            human_delay(3.0, 7.0)
-
-            jobs = _extract_jobs_from_page(page)
-            if not jobs:
-                print("  Nessun annuncio, fine paginazione.")
+                jobs = _extract_jobs_from_page(page)
+                if not jobs:
+                    break
+                new_jobs = [j for j in jobs if j["url"] not in seen_urls]
+                if not new_jobs:
+                    break   # pagina ripetuta → fine paginazione reale
+                for j in new_jobs:
+                    seen_urls.add(j["url"])
+                all_jobs.extend(new_jobs)
+                print(f"  {len(new_jobs)} nuovi ({len(jobs)} totali)")
+            except Exception as e:
+                print(f"[WARN] {url}: {e}")
                 break
-            all_jobs.extend(jobs)
-            print(f"  {len(jobs)} annunci trovati")
-        except Exception as e:
-            print(f"[WARN] {url}: {e}")
-            break
 
-    page.close()
-    print(f"[carriera.ch] Totale grezzo: {len(all_jobs)}")
-    return all_jobs
+        print(f"[carriera.ch] Totale grezzo: {len(all_jobs)}")
+        return all_jobs
+    finally:
+        page.close()

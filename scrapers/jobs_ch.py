@@ -4,10 +4,10 @@ import urllib.parse
 
 BASE_URL   = "https://www.jobs.ch"
 SEARCH_URL = "https://www.jobs.ch/en/vacancies/?term={term}&location=ticino&page={page}"
-MAX_PAGES  = 3
+MAX_PAGES  = 20   # limite di sicurezza; si ferma prima quando la pagina è vuota
 
 
-def _extract_jobs_from_page(page, category: str) -> list:
+def _extract_jobs_from_page(page) -> list:
     jobs = []
     cards = page.query_selector_all('a[data-cy="job-link"]')
     for card in cards:
@@ -38,36 +38,43 @@ def _extract_jobs_from_page(page, category: str) -> list:
     return jobs
 
 
-@retry(max_attempts=3)
+@retry()
 def scrape_jobs_ch(context, search_terms: list = None) -> list:
     if search_terms is None:
         search_terms = SEARCH_TERMS
 
-    all_jobs = []
+    all_jobs  = []
+    seen_urls = set()   # URL già raccolti (globale tra tutti i termini)
     page = new_stealth_page(context)
+    try:
+        for term in search_terms:
+            print(f"[jobs.ch] Cerco: '{term}'")
+            for page_num in range(1, MAX_PAGES + 1):
+                url = SEARCH_URL.format(term=urllib.parse.quote_plus(term), page=page_num)
+                try:
+                    page.goto(url, timeout=30_000, wait_until="domcontentloaded")
+                    page.wait_for_timeout(2000)
+                    dismiss_cookie_dialog(page)
+                    human_scroll(page)
+                    human_delay(3.0, 7.0)
 
-    for term in search_terms:
-        print(f"[jobs.ch] Cerco: '{term}'")
-        for page_num in range(1, MAX_PAGES + 1):
-            url = SEARCH_URL.format(term=urllib.parse.quote_plus(term), page=page_num)
-            try:
-                page.goto(url, timeout=30_000, wait_until="domcontentloaded")
-                page.wait_for_timeout(2000)
-                dismiss_cookie_dialog(page)
-                human_scroll(page)
-                human_delay(3.0, 7.0)
+                    jobs = _extract_jobs_from_page(page)
+                    if not jobs:
+                        break   # pagina genuinamente vuota
 
-                jobs = _extract_jobs_from_page(page, "")
-                if not jobs:
+                    new_jobs = [j for j in jobs if j["url"] not in seen_urls]
+                    if not new_jobs:
+                        break
+                    for j in new_jobs:
+                        seen_urls.add(j["url"])
+                    all_jobs.extend(new_jobs)
+                    print(f"  pag.{page_num}: {len(new_jobs)} nuovi ({len(jobs)} totali)")
+
+                except Exception as e:
+                    print(f"[WARN] {url}: {e}")
                     break
-                all_jobs.extend(jobs)
-                print(f"  pag.{page_num}: {len(jobs)} annunci")
-                if len(jobs) < 20:
-                    break
-            except Exception as e:
-                print(f"[WARN] {url}: {e}")
-                break
 
-    page.close()
-    print(f"[jobs.ch] Totale grezzo: {len(all_jobs)}")
-    return all_jobs
+        print(f"[jobs.ch] Totale grezzo: {len(all_jobs)}")
+        return all_jobs
+    finally:
+        page.close()

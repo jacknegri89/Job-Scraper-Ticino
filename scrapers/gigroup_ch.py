@@ -17,7 +17,7 @@ from filters import categorize_job
 
 BASE_URL = "https://ch.gigroup.com"
 LIST_URL = "https://ch.gigroup.com/it/posizioni-aperte/?npage={page}"
-MAX_PAGES = 5
+MAX_PAGES = 20  # limite di sicurezza; si ferma prima quando la pagina è vuota
 
 
 def _parse_date(raw: str) -> str:
@@ -74,33 +74,39 @@ def _extract_jobs_from_page(page) -> list:
                 "category": categorize_job(title),
                 "source":   "gigroup.ch",
             })
-        except Exception:
+        except Exception as e:
+            print(f"[WARN] Errore card gigroup.ch: {e}")
             continue
     return jobs
 
 
-@retry(max_attempts=3)
+@retry()
 def scrape_gigroup_ch(context) -> list:
-    all_jobs = []
+    all_jobs  = []
+    seen_urls = set()
     page = new_stealth_page(context)
+    try:
+        for page_num in range(1, MAX_PAGES + 1):
+            url = LIST_URL.format(page=page_num)
+            print(f"  [gigroup.ch] Pagina {page_num}")
 
-    for page_num in range(1, MAX_PAGES + 1):
-        url = LIST_URL.format(page=page_num)
-        print(f"  [gigroup.ch] Pagina {page_num}/{MAX_PAGES} — {url}")
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            dismiss_cookie_dialog(page)
+            page.wait_for_timeout(2000)
+            human_scroll(page)
 
-        page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        dismiss_cookie_dialog(page)
-        page.wait_for_timeout(2000)
-        human_scroll(page)
+            jobs = _extract_jobs_from_page(page)
+            if not jobs:
+                break
+            new_jobs = [j for j in jobs if j["url"] not in seen_urls]
+            if not new_jobs:
+                break   # pagina ripetuta → fine paginazione reale
+            for j in new_jobs:
+                seen_urls.add(j["url"])
+            all_jobs.extend(new_jobs)
+            print(f"  [gigroup.ch] {len(new_jobs)} nuovi (tot. {len(all_jobs)})")
+            human_delay(2.0, 5.0)
 
-        jobs = _extract_jobs_from_page(page)
-        if not jobs:
-            print(f"  [gigroup.ch] Nessun annuncio — fine paginazione.")
-            break
-
-        all_jobs.extend(jobs)
-        print(f"  [gigroup.ch] {len(jobs)} annunci trovati (totale: {len(all_jobs)})")
-        human_delay(2.0, 5.0)
-
-    page.close()
-    return all_jobs
+        return all_jobs
+    finally:
+        page.close()

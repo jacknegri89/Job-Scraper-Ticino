@@ -1,6 +1,10 @@
-profile/state.json
+profile/
 __pycache__/
 *.pyc
 .pytest_cache/
 index.html
 .playwright-mcp/
+debug/
+debug_*.html
+scan_report.json
+jobs_cache.json

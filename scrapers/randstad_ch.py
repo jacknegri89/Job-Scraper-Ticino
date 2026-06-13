@@ -10,7 +10,7 @@ Struttura verificata live:
 - Azienda: sempre "Randstad SA"
 """
 
-from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, retry
+from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, click_load_more, retry
 from filters import categorize_job
 
 BASE_URL = "https://www.randstad.ch"
@@ -59,56 +59,55 @@ _JS_EXTRACT = """
 """
 
 
-@retry(max_attempts=3)
+@retry()
 def scrape_randstad_ch(context) -> list:
     all_jobs = []
     page = new_stealth_page(context)
-
-    print(f"  [randstad.ch] Carico offerte Ticino…")
-    page.goto(LIST_URL, wait_until="domcontentloaded", timeout=30000)
-    dismiss_cookie_dialog(page)
-    page.wait_for_timeout(2000)
-
-    # Scroll per triggerare il lazy-load
-    human_scroll(page)
-    page.wait_for_timeout(1500)
-
-    # Clicca "Visualizza altri 30" se presente (carica il resto degli annunci)
     try:
-        btn = page.query_selector('button:has-text("Visualizza altri")')
-        if btn and btn.is_visible():
-            btn.click()
-            page.wait_for_timeout(2500)
-            human_scroll(page)
-            page.wait_for_timeout(1000)
-    except Exception:
-        pass
+        print(f"  [randstad.ch] Carico offerte Ticino…")
+        page.goto(LIST_URL, wait_until="domcontentloaded", timeout=30000)
+        dismiss_cookie_dialog(page)
+        page.wait_for_timeout(2000)
 
-    # Estrai tutti gli annunci visibili tramite JS
-    try:
+        human_scroll(page)
+        page.wait_for_timeout(1500)
+
+        # Il banner OneTrust può comparire in ritardo e intercettare i click
+        # del load-more: seconda passata di dismissione appena prima dei click
+        dismiss_cookie_dialog(page)
+
+        _COUNT_JS = (
+            "Array.from(document.querySelectorAll('a[href*=\"/it/lavoro/\"]'))"
+            ".filter(a => /[a-f0-9]{8}-[a-f0-9]{4}/.test(a.getAttribute('href') || '')).length"
+        )
+        total = click_load_more(
+            page,
+            btn_texts=["Visualizza altri", "Mostra altri", "Carica altri"],
+            count_js=_COUNT_JS,
+        )
+        print(f"  [randstad.ch] {total} link-annuncio nel DOM dopo load-more")
+
         jobs_raw = page.evaluate(_JS_EXTRACT)
-    except Exception as e:
-        print(f"  [randstad.ch] Errore JS: {e}")
+
+        for job in jobs_raw:
+            title = job.get("title", "").strip()
+            city  = job.get("city",  "").strip()
+            url   = job.get("url",   "").strip()
+            if not title or not url:
+                continue
+            all_jobs.append({
+                "title":    title,
+                "company":  "Randstad SA",
+                "city":     city,
+                "date":     job.get("date", ""),
+                "url":      url,
+                "category": categorize_job(title),
+                "source":   "randstad.ch",
+            })
+
+        print(f"  [randstad.ch] {len(all_jobs)} annunci trovati")
+    finally:
         page.close()
-        return []
 
-    for job in jobs_raw:
-        title = job.get("title", "").strip()
-        city  = job.get("city",  "").strip()
-        url   = job.get("url",   "").strip()
-        if not title or not url:
-            continue
-        all_jobs.append({
-            "title":    title,
-            "company":  "Randstad SA",
-            "city":     city,
-            "date":     job.get("date", ""),
-            "url":      url,
-            "category": categorize_job(title),
-            "source":   "randstad.ch",
-        })
-
-    print(f"  [randstad.ch] {len(all_jobs)} annunci trovati")
-    page.close()
     human_delay(2.0, 4.0)
     return all_jobs
