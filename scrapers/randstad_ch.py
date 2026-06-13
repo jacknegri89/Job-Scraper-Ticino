@@ -11,7 +11,7 @@ Struttura verificata live:
 """
 
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, click_load_more, retry
-from filters import categorize_job
+from job_filter import categorize_job
 
 BASE_URL = "https://www.randstad.ch"
 LIST_URL = "https://www.randstad.ch/it/lavoro/re-ticino/"

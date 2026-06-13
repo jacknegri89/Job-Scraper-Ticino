@@ -13,7 +13,7 @@ Struttura verificata live:
 from datetime import datetime
 
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, retry
-from filters import categorize_job
+from job_filter import categorize_job
 
 BASE_URL = "https://ch.gigroup.com"
 LIST_URL = "https://ch.gigroup.com/it/posizioni-aperte/?npage={page}"

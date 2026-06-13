@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from tax_calculator import calcola_netto
+from salary_calculator import calcola_netto
 
 
 def test_input_non_valido_da_dizionario_vuoto():

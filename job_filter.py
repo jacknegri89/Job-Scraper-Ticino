@@ -1,48 +1,36 @@
+# Filtro e normalizzazione degli annunci.
+# Contiene: lista comuni ammessi, parole chiave per categorie, normalizzazione
+# città/URL, filtro validità, deduplicazione e ordinamento per data.
+
 import re
 from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
 
+# Solo questi comuni del distretto di Mendrisio sono considerati raggiungibili.
 COMUNI_AMMESSI = {
     "chiasso", "mendrisio", "stabio", "balerna",
     "coldrerio", "morbio inferiore", "novazzano", "riva san vitale",
 }
 
 # Termini usati come query di ricerca su jobs.ch.
-# Mantieni questa lista CORTA (≤15 voci) — ogni termine = 3 pagine di richieste HTTP.
-# Usa termini generici che coprono molti tipi di lavoro.
+# Tieni questa lista corta (≤15 voci): ogni termine genera più richieste HTTP.
 SEARCH_TERMS = [
-    "operaio",
-    "magazziniere",
-    "tecnico",
-    "addetto",
-    "informatico",
-    "cablatore",
-    "cameriere",
-    "commesso",
-    "autista",
-    "assemblatore",
-    "pulizie",
-    "logistica",
-    "elettricista",
-    "produzione",
+    "operaio", "magazziniere", "tecnico", "addetto", "informatico",
+    "cablatore", "cameriere", "commesso", "autista", "assemblatore",
+    "pulizie", "logistica", "elettricista", "produzione",
 ]
 
-# Usato per CATEGORIZZARE gli annunci (su tutti i portali).
-# Può essere più lungo — non genera richieste HTTP aggiuntive.
+# Parole chiave per categorizzare gli annunci in base al titolo.
 KEYWORDS = {
     "tech": [
-        # Informatica / IT
         "Junior IT", "Help Desk", "Helpdesk", "IT Support",
         "Tecnico informatico", "Tecnico IT", "Operatore informatico",
         "Sviluppatore Junior", "Sistemista", "Tecnico reti",
         "Network technician", "Tecnico hardware", "Tecnico software",
-        # Elettronica / hardware
         "Operaio elettronico", "Cablatore", "Cablaggio",
         "Tecnico elettronico", "Assemblatore elettronico",
         "Montatore elettronico", "Tecnico di laboratorio",
         "IoT", "Raspberry", "Elettrotecnico",
-        # CNC / automazione
         "Operatore CNC", "Programmatore CNC", "Operatore macchine utensili",
-        # Elettricità
         "Elettricista", "Tecnico elettrico", "Installatore elettrico",
     ],
     "logistica": [
@@ -95,18 +83,20 @@ KEYWORDS = {
 
 
 def normalize_city(city_raw: str) -> str:
+    # Rimuove prefissi zona come "Mendrisiotto - Chiasso"
     if " - " in city_raw:
         city_raw = city_raw.split(" - ")[-1].strip()
-    # Strip canton/region suffixes: "Chiasso, TI" → "Chiasso", "Chiasso (TI)" → "Chiasso"
+    # Rimuove cantone/provincia: "Chiasso, TI" → "Chiasso", "Chiasso (TI)" → "Chiasso"
     city_raw = re.split(r'[,\(]', city_raw)[0].strip()
-    # CAP svizzero iniziale: "6850 Chiasso" → "Chiasso"
+    # Rimuove CAP svizzero iniziale: "6850 Chiasso" → "Chiasso"
     city_raw = re.sub(r'^\d{4,5}\s+', '', city_raw)
-    # Sigla cantone in coda senza virgola: "Chiasso TI" / "Stabio CH" → nome pulito
+    # Rimuove sigla cantone in coda: "Chiasso TI" → "Chiasso"
     city_raw = re.sub(r'\s+(?:TI|CH)$', '', city_raw, flags=re.IGNORECASE)
     return city_raw.strip().lower()
 
 
 def normalize_url(url: str) -> str:
+    # Rimuove parametri di tracciamento (utm_*) per il confronto tra URL.
     parsed = urlparse(url)
     params = parse_qs(parsed.query, keep_blank_values=False)
     clean = {k: v for k, v in params.items() if not k.startswith("utm_")}
@@ -114,12 +104,10 @@ def normalize_url(url: str) -> str:
 
 
 def _su_portale_italiano(url: str) -> bool:
-    """Gli annunci su domini .it sono lavori in Italia, non frontalierato."""
     return urlparse(url).netloc.endswith(".it")
 
 
 def is_valid_job(job: dict) -> bool:
-    """Vero se l'annuncio è in un comune ammesso e non su un portale italiano."""
     if _su_portale_italiano(job.get("url", "")):
         return False
     return normalize_city(job.get("city", "")) in COMUNI_AMMESSI
@@ -134,18 +122,16 @@ def categorize_job(title: str) -> str:
     return "altro"
 
 
-# Agenzie di somministrazione: il nome azienda è sempre identico,
-# quindi title+company+city deduplica per errore posizioni genuinamente diverse.
-# Per queste sorgenti si aggiunge un frammento dell'URL per distinguerle.
+# Le agenzie (Randstad, Orienta ecc.) hanno sempre lo stesso nome azienda,
+# quindi la dedup per titolo+azienda+città fonderebbe posizioni diverse.
+# Per queste sorgenti si usa un frammento dell'URL come discriminante aggiuntivo.
 _AGENZIE = {"randstad.ch", "orienta.ch", "gigroup.ch", "adecco.ch", "manpower.ch"}
 
 
 def _content_key(job: dict) -> str:
-    """Chiave per dedup cross-portale (stesso annuncio su jobs.ch e jobscout24.ch)."""
     t    = re.sub(r'\W+', '', job.get("title",   "")).lower()[:40]
     c    = re.sub(r'\W+', '', job.get("company", "")).lower()[:25]
     city = normalize_city(job.get("city", ""))
-    # Per agenzie: aggiungi i ~20 caratteri finali dell'URL (slug/UUID univoco)
     if job.get("source") in _AGENZIE:
         url_tail = re.sub(r'\W+', '', job.get("url", ""))[-18:]
         return f"{t}|{c}|{city}|{url_tail}"
@@ -176,11 +162,8 @@ _EU_DATE  = re.compile(r'^(\d{1,2})\.(\d{1,2})\.(\d{4})')
 
 
 def _sort_date(job: dict) -> str:
-    """
-    Chiave di ordinamento tollerante: le date sono in formati misti tra portali.
-    ISO (YYYY-MM-DD) ordina correttamente; DD.MM.YYYY viene convertito;
-    tutto il resto (testo grezzo) finisce in fondo.
-    """
+    # Converte diversi formati di data in YYYY-MM-DD per l'ordinamento.
+    # Annunci con data non riconoscibile finiscono in fondo.
     d = job.get("date", "").strip()
     if _ISO_DATE.match(d):
         return d[:10]

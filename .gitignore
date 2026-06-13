@@ -216,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Output generati dallo scraper
+index.html
+jobs_cache.json
+scan_report.json
+debug/
+
+# Sessioni auth browser (contengono cookie — non condividere)
+profile/

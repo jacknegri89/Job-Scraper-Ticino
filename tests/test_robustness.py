@@ -17,13 +17,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scrapers.report import (
+from scrapers.site_report import (
     RunReport, classify_exception, ScrapeError,
 )
-from scrapers.gates import detect_auth_gate, detect_block, dismiss_cookies
+from scrapers.page_guard import detect_auth_gate, detect_block, dismiss_cookies
 from scrapers import retry
 import scrapers as scrapers_mod
-import scrapers.config as cfg
+import scrapers.settings as cfg
 
 
 # ────────────────────────────────────────────────────────────────

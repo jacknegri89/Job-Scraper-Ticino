@@ -10,7 +10,7 @@ import re
 from datetime import date, timedelta
 
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, retry
-from filters import categorize_job
+from job_filter import categorize_job
 
 BASE_URL  = "https://www.jobscout24.ch"
 LIST_URL  = "https://www.jobscout24.ch/de/jobs/ticino/"

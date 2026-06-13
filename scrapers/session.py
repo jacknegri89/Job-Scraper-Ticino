@@ -1,28 +1,23 @@
-"""
-Sessioni autenticate manualmente — MAI login automatici.
-
-Flusso:
-  1. python scraper.py --auth linkedin
-  2. si apre un browser visibile sulla pagina di login
-  3. l'utente fa login A MANO (anche con 2FA)
-  4. lo script rileva il login riuscito e salva lo storage state
-  5. gli scraper riusano quella sessione nei run successivi
-
-Se la sessione manca o è scaduta, lo scraper segnala
-`requires_manual_login` senza fallire e senza tentare aggiramenti.
-"""
+# Sessioni autenticate — MAI login automatici.
+#
+# Flusso:
+#   1. python scraper.py --auth linkedin
+#   2. si apre un browser visibile sulla pagina di login
+#   3. l'utente fa login A MANO (funziona anche con 2FA)
+#   4. lo script rileva il login riuscito e salva lo storage state in profile/
+#   5. gli scraper riusano quella sessione nei run successivi
+#
+# Se la sessione manca o è scaduta, lo scraper segnala
+# "requires_manual_login" senza fallire e senza tentare aggiramenti.
 
 from __future__ import annotations
 
 import time
 from pathlib import Path
 
-from scrapers.config import AUTH_DIR
+from scrapers.settings import AUTH_DIR
 
 # Configurazione per sito autenticabile.
-#   login_url    : pagina dove l'utente fa login
-#   success_urls : sottostringhe URL che indicano login avvenuto
-#   success_cookie: nome cookie di sessione che conferma il login
 AUTH_SITES: dict[str, dict] = {
     "linkedin": {
         "login_url":      "https://www.linkedin.com/login",
@@ -56,7 +51,7 @@ def has_auth_state(site: str) -> bool:
 
 
 def _is_logged_in(context, cfg: dict) -> bool:
-    """Login confermato dal cookie di sessione o dall'URL della pagina."""
+    # Login confermato dal cookie di sessione o dall'URL della pagina corrente.
     try:
         cookies = context.cookies()
         if any(c.get("name") == cfg["success_cookie"] and c.get("value") for c in cookies):
@@ -74,10 +69,8 @@ def _is_logged_in(context, cfg: dict) -> bool:
 
 
 def run_auth_flow(playwright, site: str) -> bool:
-    """
-    Apre un browser VISIBILE per il login manuale e salva lo storage state.
-    Ritorna True se la sessione è stata salvata.
-    """
+    # Apre un browser visibile per il login manuale e salva lo storage state.
+    # Ritorna True se la sessione è stata salvata con successo.
     cfg = AUTH_SITES.get(site)
     if not cfg:
         print(f"[AUTH] Sito sconosciuto: {site!r}. Disponibili: {', '.join(AUTH_SITES)}")
@@ -104,9 +97,8 @@ def run_auth_flow(playwright, site: str) -> bool:
                 print(f"[AUTH] Login rilevato — sessione salvata in {state_path}")
                 return True
             time.sleep(2)
-            # Se l'utente ha chiuso il browser, esci subito
             if not context.pages:
-                break
+                break   # l'utente ha chiuso il browser manualmente
 
         print("[AUTH] Login non rilevato entro il tempo massimo. Sessione NON salvata.")
         return False

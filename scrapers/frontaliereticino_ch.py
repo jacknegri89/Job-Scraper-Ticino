@@ -12,7 +12,7 @@ import json
 import urllib.request
 from datetime import date
 
-from filters import categorize_job
+from job_filter import categorize_job
 
 _INDEX_URL = "https://cdn.frontaliereticino.ch/data/jobs-it-index.json"
 _JOB_BASE  = "https://frontaliereticino.ch/cerca-lavoro-ticino/"

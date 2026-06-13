@@ -1,31 +1,23 @@
-"""
-Rilevamento "gate" delle pagine: cookie banner, login richiesto, captcha/blocco.
-
-Filosofia:
-- I cookie banner si chiudono con regole configurabili per dominio + fallback
-  generico, loggando SEMPRE che cosa è stato cliccato.
-- Login/captcha NON si aggirano mai: si rilevano e si riporta uno stato
-  pulito (requires_auth / blocked) al chiamante.
-"""
+# Rilevamento "gate" delle pagine: cookie banner, login richiesto, captcha/blocco.
+#
+# - I cookie banner si chiudono con regole per dominio + fallback generico.
+# - Login e captcha NON si aggirano mai: vengono rilevati e riportati al chiamante
+#   come stato "requires_auth" o "blocked".
 
 from __future__ import annotations
 
 
-# ────────────────────────────────────────────────────────────────
-# Cookie banner
-# ────────────────────────────────────────────────────────────────
-
-# Selettori PROVATI per dominio (in ordine di preferenza: prima il rifiuto).
-# Chiave = sottostringa del dominio della pagina corrente.
+# Selettori CSS per il banner cookie, configurati per dominio.
+# Chiave = sottostringa del dominio della pagina. Ordine: prima "rifiuta", poi "accetta".
 COOKIE_RULES: dict[str, list[str]] = {
     "jobs.ch": [
         'button#onetrust-reject-all-handler',
         'button#onetrust-accept-btn-handler',
     ],
     "jobscout24.ch": [
-        # JobScout24 offre solo "Akzeptieren" (nessun pulsante rifiuta)
-        'button:text("Akzeptieren")',  # Playwright :text() instead of :has-text()
-        'button:has-text("Akzeptieren")',  # fallback: :has-text() syntax
+        # JobScout24 offre solo "Akzeptieren", nessun pulsante rifiuta.
+        'button:text("Akzeptieren")',
+        'button:has-text("Akzeptieren")',
         'button[class*="cookie"][class*="accept"]',
         'button[id*="cookie"]',
     ],
@@ -64,8 +56,8 @@ COOKIE_RULES: dict[str, list[str]] = {
     ],
 }
 
-# Fallback generico, provato su qualsiasi dominio senza regola dedicata.
-# Solo <button>: mai link o elementi generici (un click sbagliato può navigare).
+# Selettori generici provati su qualsiasi dominio senza regola dedicata.
+# Solo <button>: mai link o altri elementi (click sbagliato → navigazione indesiderata).
 GENERIC_COOKIE_SELECTORS = [
     'button#onetrust-reject-all-handler',
     'button:has-text("Essential cookies only")',
@@ -76,7 +68,7 @@ GENERIC_COOKIE_SELECTORS = [
     'button:has-text("rifiuta tutti")',
     'button:has-text("Rifiuta")',
     'button:has-text("Akzeptieren")',
-    'button#onetrust-accept-btn-handler',   # ultimo fallback: accetta pur di sbloccare
+    'button#onetrust-accept-btn-handler',
     'button:has-text("Accetta tutti")',
 ]
 
@@ -90,12 +82,7 @@ def _domain_of(page) -> str:
 
 
 def dismiss_cookies(page, site: str = "") -> str | None:
-    """
-    Chiude il banner cookie se visibile.
-    Ritorna il selettore cliccato (per il log) o None se nessun banner.
-
-    site: etichetta usata solo per il log (es. "jobs.ch").
-    """
+    # Chiude il banner cookie se visibile. Ritorna il selettore cliccato o None.
     domain = _domain_of(page)
     rules: list[str] = []
     for key, sels in COOKIE_RULES.items():
@@ -117,8 +104,8 @@ def dismiss_cookies(page, site: str = "") -> str | None:
         except Exception:
             continue
 
-    # Rete di sicurezza: l'overlay OneTrust a volte resta nel DOM e
-    # intercetta i click anche senza pulsanti visibili — rimuovilo.
+    # OneTrust a volte lascia un overlay nel DOM anche dopo il click:
+    # rimuovilo con JS per evitare che intercetti i click successivi.
     try:
         removed = page.evaluate(
             "() => { const els = document.querySelectorAll("
@@ -133,18 +120,14 @@ def dismiss_cookies(page, site: str = "") -> str | None:
     return clicked
 
 
-# ────────────────────────────────────────────────────────────────
-# Login / auth gate
-# ────────────────────────────────────────────────────────────────
-
-# Pattern URL inequivocabili di pagine di login
+# Pattern URL che indicano una pagina di login.
 AUTH_URL_PATTERNS = (
     "/login", "/signin", "/sign-in", "/auth/", "authwall",
     "/account/login", "checkpoint/lg", "/registrazione", "/register",
     "secure.indeed.com", "/uas/login",
 )
 
-# Titoli di pagina che indicano un gate di autenticazione
+# Titoli di pagina che indicano un gate di autenticazione.
 AUTH_TITLE_PATTERNS = (
     "accedi", "sign in", "log in", "login", "anmelden",
     "join linkedin", "registrati", "create account", "account indeed",
@@ -152,12 +135,8 @@ AUTH_TITLE_PATTERNS = (
 
 
 def detect_auth_gate(page) -> str | None:
-    """
-    Ritorna una stringa-motivo se la pagina corrente è un gate di login,
-    None altrimenti. Conservativo: il link "Accedi" nella navbar di un
-    portale NON fa scattare il rilevamento; serve un segnale forte
-    (URL di login, titolo di login, o form password visibile).
-    """
+    # Ritorna una stringa-motivo se la pagina è un gate di login, None altrimenti.
+    # Conservativo: il link "Accedi" nella navbar NON fa scattare il rilevamento.
     try:
         url = (page.url or "").lower()
         for pat in AUTH_URL_PATTERNS:
@@ -169,7 +148,6 @@ def detect_auth_gate(page) -> str | None:
             if pat in title:
                 return f"titolo di login ({title[:60]!r})"
 
-        # Form password visibile = gate quasi certo
         pwd = page.query_selector('input[type="password"]')
         if pwd and pwd.is_visible():
             return "form password visibile"
@@ -178,10 +156,7 @@ def detect_auth_gate(page) -> str | None:
     return None
 
 
-# ────────────────────────────────────────────────────────────────
-# Captcha / blocco anti-bot
-# ────────────────────────────────────────────────────────────────
-
+# Segnali che indicano un blocco anti-bot o captcha.
 BLOCK_SIGNALS = (
     "captcha", "unusual traffic", "access denied", "403 forbidden",
     "please verify", "verifica di essere", "non sono un robot",
@@ -191,7 +166,6 @@ BLOCK_SIGNALS = (
 
 
 def detect_block(page) -> str | None:
-    """Ritorna una stringa-motivo se la pagina è un blocco anti-bot/captcha."""
     try:
         title = (page.title() or "").lower()
         url   = (page.url or "").lower()

@@ -17,8 +17,8 @@ import html as html_lib
 from datetime import datetime
 from pathlib import Path
 
-from distance import km_da_barlassina
-from tax_calculator import calcola_netto
+from distance_calculator import km_da_barlassina
+from salary_calculator import calcola_netto
 
 # category_id: (colore_puntino, etichetta)
 CATEGORY = {

@@ -46,7 +46,7 @@ SESSION_FILE = PROFILE_DIR / "state.json"
 
 def create_browser_context(playwright: Playwright, headless: bool = None) -> tuple:
     """Launch Chrome with maximum anti-detection settings. Returns (browser, context)."""
-    from scrapers.config import HEADLESS
+    from scrapers.settings import HEADLESS
     if headless is None:
         headless = HEADLESS
     PROFILE_DIR.mkdir(exist_ok=True)
@@ -78,7 +78,7 @@ def create_browser_context(playwright: Playwright, headless: bool = None) -> tup
     context = browser.new_context(**context_kwargs)
     # Default per le chiamate senza timeout esplicito (i goto degli scraper
     # passano comunque il proprio timeout, che ha la precedenza)
-    from scrapers.config import PAGE_TIMEOUT_MS
+    from scrapers.settings import PAGE_TIMEOUT_MS
     context.set_default_navigation_timeout(PAGE_TIMEOUT_MS)
     return browser, context
 
@@ -179,8 +179,8 @@ def click_load_more(page, btn_texts, count_js, max_clicks=30, wait_ms=3000):
 
 
 def dismiss_cookie_dialog(page, site: str = ""):
-    """Chiude il banner cookie (regole per dominio + fallback). Vedi gates.py."""
-    from scrapers.gates import dismiss_cookies
+    """Chiude il banner cookie (regole per dominio + fallback). Vedi page_guard.py."""
+    from scrapers.page_guard import dismiss_cookies
     return dismiss_cookies(page, site)
 
 
@@ -262,8 +262,8 @@ def retry(max_attempts: int = None):
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            from scrapers.config import MAX_ATTEMPTS, RETRY_BACKOFF_S
-            from scrapers.report import classify_exception, ScrapeError
+            from scrapers.settings import MAX_ATTEMPTS, RETRY_BACKOFF_S
+            from scrapers.site_report import classify_exception, ScrapeError
             attempts = min(max_attempts or MAX_ATTEMPTS, 3)
 
             for attempt in range(attempts):

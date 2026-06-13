@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from filters import (
+from job_filter import (
     normalize_city, normalize_url, is_valid_job, filter_jobs, categorize_job,
 )
 

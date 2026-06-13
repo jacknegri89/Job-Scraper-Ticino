@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from distance import km_da_barlassina
+from distance_calculator import km_da_barlassina
 
 
 def test_chiasso_distanza_plausibile():
@@ -33,6 +33,6 @@ def test_comune_sconosciuto_da_none():
 
 def test_tutti_i_comuni_ammessi_mappati():
     """Ogni comune del filtro deve avere una distanza: mai badge mancanti."""
-    from filters import COMUNI_AMMESSI
+    from job_filter import COMUNI_AMMESSI
     for comune in COMUNI_AMMESSI:
         assert km_da_barlassina(comune) is not None, f"manca {comune}"

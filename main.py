@@ -1,45 +1,42 @@
-"""
-Entry point dello scraper lavoro Ticino.
-
-Uso:
-  python scraper.py                  scansione completa + descrizioni + AI + HTML
-  python scraper.py --scan-only      solo scansione siti + report (no descrizioni/AI/HTML)
-  python scraper.py --dry-run        probe veloce di ogni sito (raggiungibilità, cookie,
-                                     login gate) senza scraping completo
-  python scraper.py --only a,b       limita ai siti indicati (es. --only indeed,linkedin)
-  python scraper.py --headless       browser nascosto (default: visibile)
-  python scraper.py --auth linkedin  login MANUALE nel browser; salva la sessione
-  python scraper.py --reanalyze      rifà solo l'analisi AI dalla cache
-
-Test:  python -m pytest tests/ -v
-
-MAPPA DEL PROGETTO (per chi ci mette mano la prima volta)
-  scraper.py            ← sei qui: CLI, loop sui siti, fasi descrizioni/AI/HTML
-  filters.py            comuni ammessi, normalizzazione città/URL, dedup, categorie
-  distance.py           km da Barlassina per ogni comune (haversine, offline)
-  tax_calculator.py     stima netto frontaliero (lordo CH → netto IT)
-  llm_analyzer.py       analisi annunci con OpenAI (adatto/non adatto, stipendio)
-  html_generator.py     genera index.html (dashboard dark, ricerca, filtri)
-  scrapers/__init__.py  browser anti-detection, retry, fetch_description
-  scrapers/config.py    timeout/headless/tentativi (override da env SCRAPER_*)
-  scrapers/gates.py     cookie banner per dominio, rilevamento login/captcha
-  scrapers/auth.py      login manuale (--auth) e sessioni salvate in profile/
-  scrapers/report.py    stato per sito, scan_report.json, screenshot di debug
-  scrapers/<sito>.py    uno scraper per portale; ritorna list[dict] con chiavi
-                        title/company/city/date/url/category/source
-
-FLUSSO DI UN RUN COMPLETO
-  1. ogni scrapers/<sito>.py raccoglie annunci grezzi      (raw_jobs)
-  2. filters.filter_jobs   → solo comuni ammessi, dedupl.  (valid)
-  3. _reuse_previous_data  → recupera descrizioni/AI dalla cache (non si ripaga)
-  4. fetch_description     → testo annuncio + email
-  5. llm_analyzer          → adatto/non adatto + stipendio stimato
-  6. html_generator        → index.html; cache in jobs_cache.json
-
-Ogni run produce scan_report.json con lo stato per sito:
-ok / ok_partial / empty / requires_auth / requires_manual_login / blocked /
-timeout / network_error / browser_closed / selector_broken / disabled / error.
-"""
+# Entry point dello scraper lavoro Ticino.
+#
+# Uso rapido:
+#   python main.py                  scansione completa + descrizioni + AI + HTML
+#   python main.py --scan-only      solo scansione siti + report (no descrizioni/AI/HTML)
+#   python main.py --dry-run        probe veloce (raggiungibilità, cookie, login gate)
+#   python main.py --only a,b       limita ai siti indicati (es. --only indeed,linkedin)
+#   python main.py --headless       browser nascosto (default: visibile)
+#   python main.py --auth linkedin  login MANUALE nel browser; salva la sessione
+#   python main.py --reanalyze      rifà solo l'analisi AI dalla cache
+#   python -m pytest tests/ -v      esegue tutti i test
+#
+# MAPPA DEL PROGETTO
+#   main.py                    ← sei qui: CLI, loop sui siti, fasi descrizioni/AI/HTML
+#   job_filter.py              comuni ammessi, normalizzazione città/URL, dedup, categorie
+#   distance_calculator.py     km da Barlassina per ogni comune (haversine, offline)
+#   salary_calculator.py       stima netto frontaliero (lordo CH → netto IT)
+#   ai_analyzer.py             analisi annunci con OpenAI (adatto/non adatto, stipendio)
+#   dashboard_builder.py       genera index.html (dashboard dark, ricerca, filtri)
+#   scrapers/__init__.py       browser anti-detection, retry, fetch_description
+#   scrapers/settings.py       timeout/headless/tentativi (override da env SCRAPER_*)
+#   scrapers/page_guard.py     cookie banner per dominio, rilevamento login/captcha
+#   scrapers/session.py        login manuale (--auth) e sessioni salvate in profile/
+#   scrapers/site_report.py    stato per sito, scan_report.json, screenshot di debug
+#   scrapers/<sito>.py         uno scraper per portale; ritorna list[dict]:
+#                              title/company/city/date/url/category/source
+#
+# FLUSSO DI UN RUN COMPLETO
+#   1. scrapers/<sito>.py  raccoglie annunci grezzi           (raw_jobs)
+#   2. job_filter.filter_jobs  filtra comuni ammessi + dedup  (valid)
+#   3. _reuse_previous_data recupera desc/AI dalla cache      (non si ripaga)
+#   4. fetch_description    scarica testo annuncio + email
+#   5. ai_analyzer          analisi AI (adatto/non adatto + stipendio stimato)
+#   6. dashboard_builder    genera index.html, salva jobs_cache.json
+#
+# Stati nel scan_report.json:
+#   ok / ok_partial / empty / requires_auth / requires_manual_login /
+#   blocked / timeout / network_error / browser_closed / selector_broken /
+#   disabled / error
 
 import argparse
 import json
@@ -52,9 +49,9 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 from scrapers import create_browser_context, save_session, fetch_description, SESSION_FILE
-from scrapers.report import run_report, classify_exception, ScrapeError
-from scrapers.gates import dismiss_cookies, detect_auth_gate, detect_block
-from scrapers import config as cfg
+from scrapers.site_report import run_report, classify_exception, ScrapeError
+from scrapers.page_guard import dismiss_cookies, detect_auth_gate, detect_block
+from scrapers import settings as cfg
 from scrapers.jobs_ch import scrape_jobs_ch
 from scrapers.carriera_ch import scrape_carriera_ch
 from scrapers.gigroup_ch import scrape_gigroup_ch
@@ -67,9 +64,9 @@ from scrapers.adecco_ch import scrape_adecco_ch
 from scrapers.manpower_ch import scrape_manpower_ch
 from scrapers.frontaliereticino_ch import scrape_frontaliereticino_ch
 from scrapers.linkedin_ch import scrape_linkedin_ch
-from filters import filter_jobs, is_valid_job, normalize_url
-from html_generator import generate_html
-from llm_analyzer import analyze_jobs
+from job_filter import filter_jobs, is_valid_job, normalize_url
+from dashboard_builder import generate_html
+from ai_analyzer import analyze_jobs
 
 CACHE_FILE = Path("jobs_cache.json")
 
@@ -573,7 +570,7 @@ def main():
 
     # Modalità login manuale: nessuno scraping
     if args.auth:
-        from scrapers.auth import run_auth_flow
+        from scrapers.session import run_auth_flow
         with sync_playwright() as p:
             ok = run_auth_flow(p, args.auth.strip().lower())
         sys.exit(0 if ok else 1)

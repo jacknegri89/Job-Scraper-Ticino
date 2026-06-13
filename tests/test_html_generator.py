@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from html_generator import generate_html, build_card
+from dashboard_builder import generate_html, build_card
 
 
 def _job(**extra) -> dict:

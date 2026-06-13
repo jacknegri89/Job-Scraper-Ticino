@@ -27,9 +27,9 @@ import re
 from datetime import date, timedelta
 
 from scrapers import new_stealth_page, human_delay, human_scroll, retry
-from scrapers.auth import has_auth_state, auth_state_path
-from scrapers.report import run_report, debug_artifacts
-from filters import categorize_job
+from scrapers.session import has_auth_state, auth_state_path
+from scrapers.site_report import run_report, debug_artifacts
+from job_filter import categorize_job
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ echo Configurazione Task Scheduler Windows...
 echo.
 
 for /f "delims=" %%i in ('python -c "import sys; print(sys.executable)"') do set PYTHON_PATH=%%i
-set SCRIPT_PATH=%~dp0scraper.py
+set SCRIPT_PATH=%~dp0main.py
 
 if not defined PYTHON_PATH (
     echo [ERRORE] Python non trovato. Assicurati che Python sia installato nel PATH di sistema.

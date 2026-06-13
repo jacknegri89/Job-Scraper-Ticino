@@ -1,35 +1,41 @@
-"""
-Analisi AI degli annunci di lavoro tramite OpenAI (gpt-4o-mini).
-
-Richiede la variabile d'ambiente OPENAI_API_KEY impostata.
-Aggiunge a ogni annuncio i campi:
-  - llm_adatto      (bool|None) : True/False se analizzato, None se chiamata fallita
-  - llm_motivo      (str)       : breve spiegazione (max ~10 parole)
-  - llm_descrizione (str)       : 3-4 frasi su cosa si fa concretamente nel lavoro
-"""
+# Analisi AI degli annunci tramite OpenAI (gpt-4o-mini).
+# Richiede la variabile d'ambiente OPENAI_API_KEY.
+#
+# Aggiunge a ogni annuncio:
+#   llm_adatto      (bool|None) — True/False se analizzato, None se la chiamata fallisce
+#   llm_motivo      (str)       — breve spiegazione (~10 parole)
+#   llm_descrizione (str)       — 4-5 frasi su cosa si fa concretamente
+#   llm_stipendio_lordo (int|None) — stima CHF/mese
 
 import os
 import re
 import json
 import time
 
-# gpt-4o-mini Tier 1: 500 RPM → 1 chiamata ogni 1.5s è più che sicuro
-_DELAY_BETWEEN_CALLS = 1.5
+_DELAY_BETWEEN_CALLS = 1.5   # secondi tra chiamate (limite Tier 1: 500 RPM)
 _MAX_RETRY           = 4
-_RATE_LIMIT_WAIT     = 20   # secondi di attesa base al 429 transitorio
+_RATE_LIMIT_WAIT     = 20    # secondi di attesa base al 429 transitorio
 
+# Profilo del candidato inviato al modello come contesto.
 PROFILO = """
-Giacomo, 20 anni, Barlassina (MB). Cerca lavoro full-time frontaliero Ticino. Primo impiego.
-Diploma informatica 2026. Stage: IoT, saldatura, assemblaggio, logistica. Auto propria. EN B1.
+Giacomo, 20 anni, Barlassina (MB). Cerca lavoro full-time frontaliero Ticino.
+Primo impiego assoluto: unica esperienza è uno stage scolastico di 1 mese (non retribuito,
+parte del percorso scolastico). Nessuna esperienza lavorativa remunerata.
+Diploma informatica 2026. Lingue di programmazione studiate a scuola: C++, C#, Python,
+Java, JavaScript, HTML, PHP, Assembly.
+Auto propria. Inglese B1.
 
 NON ADATTO se anche solo uno di questi:
 - Richiede laurea (medicina, psicologia, legge, farmacia, fisioterapia, ecc.) o PhD
-- Titolo protetto: medico, psicologo, infermiere diplomato/specializzato, farmacista, fisioterapista, ergoterapista, ostetrica, avvocato
+- Titolo protetto: medico, psicologo, infermiere, farmacista, fisioterapista, avvocato
 - Stage riservato a studenti universitari di discipline specifiche
 - Residenza svizzera obbligatoria (permesso B/C esplicito)
-- 3+ anni di esperienza specifica richiesta
+- Richiede 1+ anni di esperienza lavorativa concreta (non stage scolastico)
 
-ADATTO in tutti gli altri casi (operaio, magazzino, pulizie, ristorazione, retail, IT junior, ecc.).
+ADATTO in tutti gli altri casi: operaio, magazzino, pulizie, ristorazione, retail,
+IT junior/helpdesk/junior dev, assemblaggio, logistica, ecc.
+Per ruoli IT: adatto anche se richiedono linguaggi che conosce (C++, C#, Python,
+Java, JS, HTML, PHP, Assembly), purché non richiedano anni di esperienza professionale.
 """
 
 _SYSTEM_MSG = (
@@ -37,7 +43,6 @@ _SYSTEM_MSG = (
     f"Profilo candidato:\n{PROFILO}"
 )
 
-# NB: graffe singole — il riempimento usa .replace(), non .format()
 _USER_PROMPT = """\
 Analizza questo annuncio di lavoro:
 
@@ -53,7 +58,7 @@ Rispondi con questo JSON (tutti i campi obbligatori):
 
 
 class _QuotaEsaurita(Exception):
-    """Credito/quota OpenAI esaurito: inutile ritentare, si interrompe l'analisi."""
+    """Credito OpenAI esaurito: inutile ritentare."""
 
 
 def _is_quota_exhausted(exc: Exception) -> bool:
@@ -66,14 +71,13 @@ def _is_rate_limit(exc: Exception) -> bool:
 
 
 def _stipendio_valido(raw) -> int | None:
-    """Il modello a volte risponde con null, stringhe o zeri: accetta solo interi > 0."""
+    # Il modello a volte risponde con null, stringhe o zero: accetta solo int > 0.
     if isinstance(raw, (int, float)) and raw > 0:
         return int(raw)
     return None
 
 
 def _applica_risposta(job: dict, result: dict) -> None:
-    """Copia i campi della risposta JSON del modello sull'annuncio."""
     job["llm_adatto"]          = bool(result.get("adatto", True))
     job["llm_motivo"]          = str(result.get("motivo", ""))[:120]
     job["llm_descrizione"]     = str(result.get("descrizione", ""))[:2000]
@@ -81,7 +85,6 @@ def _applica_risposta(job: dict, result: dict) -> None:
 
 
 def _testo_annuncio(job: dict) -> str:
-    """Testo dell'annuncio passato al modello."""
     descrizione = job.get("description", "").strip()
     righe = (
         f"Titolo: {job.get('title', '—')}\n"
@@ -112,7 +115,8 @@ def _chiedi_llm(client, job: dict, job_idx: int) -> dict:
             )
             contenuto = response.choices[0].message.content
             if not contenuto:
-                raise ValueError("risposta vuota dal modello (refusal o filtro contenuti)")
+                raise ValueError("risposta vuota dal modello")
+            # Rimuove i backtick che il modello a volte aggiunge attorno al JSON
             contenuto = re.sub(r'^```(?:json)?\s*', '', contenuto.strip())
             contenuto = re.sub(r'\s*```$',          '', contenuto).strip()
             _applica_risposta(job, json.loads(contenuto))
@@ -154,11 +158,7 @@ def _set_defaults(jobs: list) -> list:
 
 
 def analyze_jobs(jobs: list) -> list:
-    """
-    Analizza la lista di annunci con gpt-4o-mini (OpenAI).
-    Se OPENAI_API_KEY non è impostata o il pacchetto openai manca,
-    restituisce la lista invariata (analisi saltata, dati intatti).
-    """
+    # Se OPENAI_API_KEY non è impostata o il pacchetto manca, restituisce la lista invariata.
     if not os.environ.get("OPENAI_API_KEY"):
         print("[LLM] OPENAI_API_KEY non trovata — analisi AI saltata.")
         return _set_defaults(jobs)
@@ -166,7 +166,7 @@ def analyze_jobs(jobs: list) -> list:
     try:
         from openai import OpenAI
     except ImportError:
-        print("[LLM] Pacchetto 'openai' non installato (python -m pip install openai) — analisi saltata.")
+        print("[LLM] Pacchetto 'openai' non installato — analisi saltata.")
         return _set_defaults(jobs)
 
     if not jobs:
@@ -183,7 +183,7 @@ def analyze_jobs(jobs: list) -> list:
     analizzati = []
     try:
         for i, job in enumerate(jobs, start=1):
-            # Già analizzato in un run precedente (cache): non ripagare la chiamata
+            # Annuncio già analizzato in cache: non ripagare la chiamata API.
             if job.get("llm_adatto") is not None:
                 analizzati.append(job)
                 continue
@@ -191,7 +191,6 @@ def analyze_jobs(jobs: list) -> list:
                 analizzati.append(_chiedi_llm(client, job, i))
             except _QuotaEsaurita as e:
                 print(f"  [LLM] QUOTA ESAURITA: {e}")
-                print("  [LLM] Interrompo l'analisi — gli annunci restanti non vengono analizzati.")
                 print("  [LLM] Ricarica il credito su platform.openai.com e rilancia: python scraper.py --reanalyze")
                 break
             if i < len(jobs):
@@ -200,10 +199,9 @@ def analyze_jobs(jobs: list) -> list:
                 ok = sum(1 for j in analizzati if j.get("llm_adatto") is not None)
                 print(f"  [LLM] {i}/{len(jobs)} — {ok} analizzati con successo")
     except KeyboardInterrupt:
-        print(f"\n  [LLM] Interrotto manualmente (Ctrl+C) dopo {len(analizzati)} annunci — salvo i risultati parziali.")
+        print(f"\n  [LLM] Interrotto (Ctrl+C) dopo {len(analizzati)} annunci — salvo i risultati parziali.")
 
-    # Gli annunci non processati (quota esaurita, Ctrl+C) escono con i default,
-    # così la cache resta coerente e --reanalyze riparte da dove si era fermato
+    # Gli annunci non processati escono con i default, così --reanalyze riparte da qui.
     if len(analizzati) < len(jobs):
         analizzati.extend(_set_defaults(jobs[len(analizzati):]))
 

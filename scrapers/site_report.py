@@ -1,21 +1,18 @@
-"""
-Report strutturato della scansione: uno stato per ogni sito.
-
-Stati possibili:
-  ok                      annunci raccolti, nessun problema
-  ok_partial              annunci raccolti ma una parte del sito è inaccessibile
-                          (es. paginazione dietro login)
-  empty                   sito raggiungibile ma zero annunci (può essere normale)
-  requires_auth           il contenuto è dietro login — serve autenticazione
-  requires_manual_login   serve la sessione salvata: python scraper.py --auth <sito>
-  blocked                 captcha / anti-bot
-  timeout                 la pagina non ha risposto nei tempi
-  network_error           DNS/connessione/abort
-  browser_closed          browser o pagina chiusi durante lo scraping
-  selector_broken         pagina raggiunta ma struttura DOM non riconosciuta
-  disabled                scraper disattivato di proposito (es. monster.ch)
-  error                   errore non classificato (vedi reason)
-"""
+# Report strutturato della scansione: uno stato per ogni sito.
+#
+# Stati possibili:
+#   ok                    annunci raccolti, nessun problema
+#   ok_partial            annunci raccolti ma parte del sito è inaccessibile
+#   empty                 sito raggiungibile ma zero annunci
+#   requires_auth         contenuto dietro login
+#   requires_manual_login serve la sessione: python scraper.py --auth <sito>
+#   blocked               captcha / anti-bot
+#   timeout               la pagina non ha risposto in tempo
+#   network_error         DNS / connessione / abort
+#   browser_closed        browser o pagina chiusi durante lo scraping
+#   selector_broken       pagina raggiunta ma struttura DOM non riconosciuta
+#   disabled              scraper disattivato di proposito (es. monster.ch)
+#   error                 errore non classificato (vedi campo reason)
 
 from __future__ import annotations
 
@@ -24,7 +21,7 @@ import time
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 
-from scrapers.config import DEBUG_DIR, REPORT_FILE
+from scrapers.settings import DEBUG_DIR, REPORT_FILE
 
 
 @dataclass
@@ -43,28 +40,27 @@ class RunReport:
     """Raccoglie i risultati di tutti i siti di una scansione."""
 
     def __init__(self):
-        self._results: dict[str, SiteResult] = {}
-        self._overrides: dict[str, dict] = {}
+        self._results:   dict[str, SiteResult] = {}
+        self._overrides: dict[str, dict]       = {}
         self.started = datetime.now()
 
-    # Chiamato DAGLI scraper quando rilevano un gate (login, captcha…)
-    # senza interrompere la raccolta dei job già trovati.
     def set_status(self, site: str, status: str, reason: str = "",
                    final_url: str = "", screenshot: str = "") -> None:
+        # Chiamato dagli scraper quando rilevano un gate (login, captcha)
+        # senza interrompere la raccolta degli annunci già trovati.
         self._overrides[site] = {
             "status": status, "reason": reason,
             "final_url": final_url, "screenshot": screenshot,
         }
         print(f"  [report] {site}: {status}" + (f" — {reason}" if reason else ""))
 
-    # Chiamato dal runner al termine di ogni scraper.
     def finish(self, site: str, jobs: int, duration_s: float,
                status: str = "", reason: str = "", attempts: int = 1) -> SiteResult:
         ov = self._overrides.get(site, {})
         if not status:
             status = "ok" if jobs > 0 else "empty"
-        # Un override dello scraper vince sullo stato calcolato,
-        # ma se ci sono comunque job raccolti diventa ok_partial.
+        # Un override dello scraper (gate/blocco) vince sullo stato calcolato.
+        # Se però ci sono annunci raccolti, lo stato diventa ok_partial.
         if ov:
             status = ov["status"]
             reason = ov["reason"] or reason
@@ -108,16 +104,14 @@ class RunReport:
         print(f"  {n_ok}/{len(self.results)} siti con annunci raccolti\n")
 
 
-# Istanza condivisa: gli scraper la importano per segnalare i gate
+# Istanza condivisa: gli scraper la importano per segnalare gate e blocchi.
 run_report = RunReport()
 
 
 def debug_artifacts(page, tag: str) -> str:
-    """
-    Salva screenshot + HTML della pagina in debug/ per diagnosi.
-    Ritorna il percorso dello screenshot ("" se non riuscito).
-    Non solleva mai: chiamato nei path di errore.
-    """
+    # Salva screenshot + HTML della pagina in debug/ per diagnosi.
+    # Ritorna il percorso dello screenshot ("" se non riuscito).
+    # Non solleva mai: viene chiamato nei percorsi di errore.
     DEBUG_DIR.mkdir(exist_ok=True)
     shot = ""
     try:
@@ -134,10 +128,6 @@ def debug_artifacts(page, tag: str) -> str:
         print(f"  [debug] {tag}: screenshot + HTML salvati in {DEBUG_DIR}\\")
     return shot
 
-
-# ────────────────────────────────────────────────────────────────
-# Classificazione eccezioni → stato
-# ────────────────────────────────────────────────────────────────
 
 def classify_exception(e: Exception) -> tuple[str, str]:
     """Mappa un'eccezione Playwright/di rete su (status, reason)."""

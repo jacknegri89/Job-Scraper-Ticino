@@ -10,7 +10,7 @@ Struttura: article > a[href*='/offerta-di-lavoro/'] > h2
 
 from datetime import datetime
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, retry
-from filters import categorize_job
+from job_filter import categorize_job
 
 BASE_URL  = "https://www.orienta.ch"
 LIST_URL  = "https://www.orienta.ch/it/orienta-job/offerte-di-lavoro.html"

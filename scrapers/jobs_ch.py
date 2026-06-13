@@ -1,5 +1,5 @@
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, retry
-from filters import SEARCH_TERMS, categorize_job
+from job_filter import SEARCH_TERMS, categorize_job
 import urllib.parse
 
 BASE_URL   = "https://www.jobs.ch"

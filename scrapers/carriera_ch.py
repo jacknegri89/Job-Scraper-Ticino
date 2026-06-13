@@ -1,5 +1,5 @@
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, retry
-from filters import categorize_job
+from job_filter import categorize_job
 
 LIST_URL  = "https://www.carriera.ch/offerte/annunci-offerte-lavoro_0_0_{page}.html"
 MAX_PAGES = 50  # limite di sicurezza; si ferma prima quando una pagina non porta nuovi annunci

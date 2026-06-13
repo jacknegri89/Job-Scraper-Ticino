@@ -10,8 +10,8 @@ import re
 from datetime import date
 
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, retry
-from scrapers.report import run_report, debug_artifacts
-from filters import categorize_job
+from scrapers.site_report import run_report, debug_artifacts
+from job_filter import categorize_job
 
 BASE_URL  = "https://www.manpower.ch"
 MAX_PAGES = 10

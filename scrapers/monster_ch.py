@@ -8,7 +8,7 @@ recuperabile. La funzione restituisce lista vuota senza aprire il browser.
 
 
 def scrape_monster_ch(context) -> list:  # noqa: ARG001
-    from scrapers.report import run_report
+    from scrapers.site_report import run_report
     print("  [monster.ch] Portale non disponibile (redirect a monster.com/de) — skip")
     run_report.set_status("monster.ch", "disabled",
                           "monster.ch reindirizza a monster.com/de — nessun portale CH")

@@ -1,30 +1,28 @@
-"""
-Scraper per Indeed Svizzera (ch.indeed.com) — annunci in Ticino.
-
-Strategia: ricerche per keyword (modalità pubblica, nessuna sessione).
-Indeed mostra pagina 1 senza login; alla pagina 2 richiede registrazione.
-Con N keyword diverse si ottengono N×15 annunci, deduplicati per job-key.
-
-URL: https://ch.indeed.com/jobs?q=<keyword>&l=Ticino&radius=50
-Struttura DOM confermata (2026-06):
-  a[data-jk]                      → link annuncio
-  span[id^="jobTitle"]            → titolo
-  [data-testid="company-name"]    → azienda
-  [data-testid="text-location"]   → città
-"""
+# Scraper per Indeed Svizzera (ch.indeed.com) — annunci in Ticino.
+#
+# Strategia: ricerche per keyword in modalità pubblica (nessuna sessione).
+# Indeed mostra pagina 1 senza login; dalla pagina 2 richiede registrazione.
+# Con N keyword diverse si ottengono N×15 annunci, deduplicati per job-key (jk).
+#
+# URL: https://ch.indeed.com/jobs?q=<keyword>&l=Ticino&radius=50
+# Struttura DOM confermata (2026-06):
+#   a[data-jk]                   → link annuncio
+#   span[id^="jobTitle"]         → titolo
+#   [data-testid="company-name"] → azienda
+#   [data-testid="text-location"]→ città
 
 import re
 from datetime import date, timedelta
 
 from scrapers import new_stealth_page, human_delay, human_scroll, retry
-from scrapers.gates import detect_auth_gate, detect_block, dismiss_cookies
-from scrapers.report import run_report, debug_artifacts
-from filters import categorize_job
+from scrapers.page_guard import detect_auth_gate, detect_block, dismiss_cookies
+from scrapers.site_report import run_report, debug_artifacts
+from job_filter import categorize_job
 
 BASE_URL = "https://ch.indeed.com"
 LIST_URL = "https://ch.indeed.com/jobs"
 
-# Keyword da cercare — ogni keyword = pagina 1 (15 risultati) → ~15×N unici dopo dedup
+# Ogni keyword genera una ricerca sulla pagina 1 (~15 risultati).
 _KEYWORDS = [
     "", "operaio", "magazziniere", "tecnico", "addetto",
     "autista", "elettricista", "assemblatore", "logistica",
@@ -33,6 +31,7 @@ _KEYWORDS = [
 
 
 def _relative_to_date(text: str) -> str:
+    # Converte date relative ("2 giorni fa", "ieri", "30+ days ago") in YYYY-MM-DD.
     today = date.today()
     t = text.lower().strip()
     if not t or "oggi" in t or "just posted" in t or "appena" in t or "now" in t:
@@ -52,6 +51,7 @@ def _relative_to_date(text: str) -> str:
     return today.isoformat()
 
 
+# Estrae i job dalla pagina tramite JavaScript (più affidabile dei CSS selector).
 _JS_EXTRACT = r"""() => {
     const results = [];
     const seen = new Set();
@@ -91,7 +91,6 @@ _JS_EXTRACT = r"""() => {
 
 
 def _scrape_keyword(page, keyword: str, seen_jk: set, cookie_done: list) -> list:
-    """Scarica pagina 1 per una keyword. Restituisce nuovi job trovati."""
     q = keyword.replace(" ", "+")
     url = f"{LIST_URL}?q={q}&l=Ticino&radius=50"
     label = repr(keyword) if keyword else "'(tutte)'"
@@ -107,20 +106,19 @@ def _scrape_keyword(page, keyword: str, seen_jk: set, cookie_done: list) -> list
             print(f"  [indeed.ch] Navigazione fallita ({type(e).__name__}) — skip")
             return []
 
-    # Cookie banner — solo alla prima pagina
+    # Cookie banner: chiuso solo alla prima pagina della sessione.
     if not cookie_done[0]:
         dismiss_cookies(page, "indeed.ch")
         page.wait_for_timeout(1500)
         cookie_done[0] = True
 
-    # Blocco / auth gate
     if detect_block(page):
         print("  [indeed.ch] Blocco anti-bot rilevato — stop")
         return []
     if detect_auth_gate(page):
-        return []   # gate atteso a pagina 2+, qui è pagina 1 → segnale strano, skip
+        return []
 
-    # Attendi card
+    # Attendi che le card siano nel DOM.
     for sel in ["[data-jk]", "#mosaic-provider-jobcards", ".job_seen_beacon"]:
         try:
             page.wait_for_selector(sel, timeout=5000)
@@ -158,13 +156,9 @@ def _scrape_keyword(page, keyword: str, seen_jk: set, cookie_done: list) -> list
 
 @retry()
 def scrape_indeed_ch(context) -> list:
-    """
-    Modalità pubblica con ricerche per keyword.
-    Nessuna sessione, nessun login, nessun crash.
-    """
-    all_jobs  = []
-    seen_jk   = set()
-    cookie_done = [False]   # lista per mutabilità in closure
+    all_jobs    = []
+    seen_jk     = set()
+    cookie_done = [False]   # lista per permettere la modifica dalla funzione interna
 
     page = new_stealth_page(context)
     try:
