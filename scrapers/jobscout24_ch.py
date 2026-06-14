@@ -1,13 +1,15 @@
 """
-Scraper per JobScout24 Svizzera (www.jobscout24.ch)
+Scraper for JobScout24 Switzerland (www.jobscout24.ch)
 
-URL lista: /de/jobs/ticino/?p=N  (interfaccia tedesca, contenuto italiano)
-~162 annunci su 9 pagine. Separato da jobs.ch nonostante stesso gruppo JobCloud.
-Date relative in tedesco: "1 T" = 1 giorno, "1 W" = 1 settimana, "1+M" = 1+ mese.
+List URL: /de/jobs/ticino/?p=N (German UI, Italian content)
+About 162 jobs across 9 pages. Kept separate from jobs.ch despite the shared JobCloud group.
+Relative dates use German units: "1 T" = 1 day, "1 W" = 1 week, "1+M" = 1+ month.
 """
 
 import re
 from datetime import date, timedelta
+
+from playwright.sync_api import BrowserContext, Page
 
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, retry
 from job_filter import categorize_job
@@ -19,12 +21,12 @@ MAX_PAGES = 15
 
 def _relative_to_date(text: str) -> str:
     """
-    Converte date relative tedesche in YYYY-MM-DD:
-      '1 T' → ieri   (Tag = giorno)
-      '6 T' → 6 giorni fa
-      '1 W' → 1 settimana fa   (Woche)
-      '2 W' → 2 settimane fa
-      '1+M' → ~30+ giorni fa   (Monat)
+    Convert German relative date units to YYYY-MM-DD:
+      '1 T'  -> 1 day ago
+      '6 T'  -> 6 days ago
+      '1 W'  -> 1 week ago
+      '2 W'  -> 2 weeks ago
+      '1+M' -> about 30+ days ago
     """
     today = date.today()
     m = re.search(r'(\d+)\+?\s*([TWM])', text)
@@ -40,7 +42,7 @@ def _relative_to_date(text: str) -> str:
     return today.isoformat()
 
 
-def _extract_jobs(page) -> list:
+def _extract_jobs(page: Page) -> list[dict[str, str]]:
     return page.evaluate(r"""() => {
         const results = [];
         const anchors = document.querySelectorAll('a[href^="/de/job/"]');
@@ -57,7 +59,7 @@ def _extract_jobs(page) -> list:
             const title = a.innerText.trim();
             if (!title) continue;
 
-            // Primo <p> nel li: "Azienda, Città"
+            // First <p> in li: "Company, City"
             const firstP = li.querySelector('p');
             let company = '', city = '';
             if (firstP) {
@@ -66,7 +68,7 @@ def _extract_jobs(page) -> list:
                 city    = parts[1] || '';
             }
 
-            // Data relativa: ultima riga non vuota del li
+            // Relative date: last non-empty line in li
             const lines = li.innerText.split('\n').map(s => s.trim()).filter(Boolean);
             const dateRaw = lines[lines.length - 1] || '';
 
@@ -77,14 +79,14 @@ def _extract_jobs(page) -> list:
 
 
 @retry()
-def scrape_jobscout24_ch(context) -> list:
+def scrape_jobscout24_ch(context: BrowserContext) -> list[dict[str, str]]:
     all_jobs  = []
     seen_urls = set()
     page = new_stealth_page(context)
     try:
         for page_num in range(1, MAX_PAGES + 1):
             url = f"{LIST_URL}?p={page_num}"
-            print(f"  [jobscout24.ch] Pagina {page_num}…")
+            print(f"  [jobscout24.ch] Page {page_num}...")
             page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
             if page_num == 1:
@@ -117,12 +119,12 @@ def scrape_jobscout24_ch(context) -> list:
                 })
 
             if not new_jobs:
-                break   # pagina ripetuta → fine paginazione reale
+                break   # Repeated page: real pagination ended.
             all_jobs.extend(new_jobs)
-            print(f"  [jobscout24.ch] {len(new_jobs)} nuovi (tot. {len(all_jobs)})")
+            print(f"  [jobscout24.ch] {len(new_jobs)} new (total {len(all_jobs)})")
             human_delay(2.0, 4.0)
 
-        print(f"  [jobscout24.ch] {len(all_jobs)} annunci trovati")
+        print(f"  [jobscout24.ch] {len(all_jobs)} jobs found")
         return all_jobs
     finally:
         page.close()

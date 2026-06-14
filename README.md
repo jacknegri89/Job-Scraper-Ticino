@@ -1,105 +1,204 @@
 # Job Scraper Ticino
 
-Raccoglie annunci di lavoro dai principali portali svizzeri, filtra quelli in Ticino e genera una dashboard HTML interattiva con analisi AI, stima dello stipendio netto e distanza da Barlassina.
+Job Scraper Ticino collects public job postings from Swiss portals, filters them
+for the Mendrisio district, enriches them with optional AI analysis, and writes
+an interactive `index.html` dashboard.
 
-## Cosa fa
+The project is designed for local use. Generated outputs, browser sessions, and
+personal configuration stay out of Git.
 
-- Scrapa 11 portali di lavoro svizzeri (jobs.ch, indeed.ch, LinkedIn, Adecco, Randstad, ecc.)
-- Filtra automaticamente gli annunci per comuni del Ticino ammissibili
-- Analizza ogni annuncio con OpenAI (adatto / non adatto al profilo, stima stipendio)
-- Calcola il netto mensile stimato per i frontalieri italiani (Quellensteuer + IRPEF)
-- Calcola la distanza in km da Barlassina (MB) per ogni sede di lavoro
-- Genera `index.html`: dashboard dark con ricerca live, filtri per categoria e ordinamento
+## Install
 
-## Avvio rapido
+Use Python 3.10 or newer.
 
 ```bash
-# Installa dipendenze
-pip install -r requirements.txt
-playwright install chromium
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m playwright install chromium
+```
 
-# Scansione completa (scraping + AI + HTML)
+`requirements.txt` is the required dependency file for this project. Keep it in
+sync when runtime or test dependencies change.
+
+## Quickstart
+
+Create your local config from the template:
+
+```bash
+copy user_config.example.py user_config.py
+```
+
+Edit `user_config.py` with your home coordinates, dashboard home-city label, and
+AI profile. `user_config.py` is local and ignored by Git; commit changes to
+`user_config.example.py` only when the shared template needs to change.
+
+Run a full scan:
+
+```bash
 python main.py
+```
 
-# Solo scansione siti, nessuna AI né HTML
+After a successful run, open `index.html` in a browser. The dashboard includes
+live search, category filters, an AI match filter, distance sorting, estimated
+salary details, and links to the original postings.
+
+## CLI Modes
+
+```bash
+python main.py
+```
+Run the complete workflow: scrape, fetch descriptions, run AI analysis when
+configured, save the cache, generate `index.html`, and open it.
+
+```bash
 python main.py --scan-only
+```
+Scan sites and write `scan_report.json`, without fetching descriptions, AI
+analysis, or dashboard generation.
 
-# Probe veloce per testare raggiungibilità e cookie banner
+```bash
 python main.py --dry-run
+```
+Probe each site quickly for reachability, cookie banners, login gates, and basic
+selectors.
 
-# Solo un subset di siti
+```bash
 python main.py --only jobs.ch,indeed
+```
+Limit the run to selected site keys. Partial runs merge with the existing cache
+where possible.
 
-# Browser nascosto (headless)
+```bash
 python main.py --headless
+```
+Run Chromium without a visible browser window.
 
-# Login manuale per LinkedIn/Indeed (salva la sessione per i run successivi)
+```bash
+python main.py --timeout 45000
+```
+Override the navigation timeout in milliseconds.
+
+```bash
 python main.py --auth linkedin
+```
+Open a manual login flow for supported sites and save the browser session for
+later runs.
 
-# Riesegui solo l'analisi AI dalla cache (senza riscraping)
+```bash
 python main.py --reanalyze
 ```
+Reuse `jobs_cache.json` and rerun only the AI analysis.
 
-## Struttura del progetto
+## Architecture
 
-```
-main.py                  Entry point — CLI, loop siti, fasi descrizioni/AI/HTML
-job_filter.py            Comuni ammessi, normalizzazione città/URL, dedup, categorie
-distance_calculator.py   Distanza da Barlassina (formula haversine, offline)
-salary_calculator.py     Stima netto frontaliero (lordo CHF → netto EUR/mese)
-ai_analyzer.py           Analisi annunci con OpenAI gpt-4o-mini
-dashboard_builder.py     Genera index.html (dashboard dark, ricerca, filtri)
+```text
+main.py                  CLI entry point and workflow orchestration
+job_filter.py            Ticino city filtering, URL normalization, deduping, categories
+distance_calculator.py   Offline haversine distance from configured HOME_CITY
+salary_calculator.py     Swiss gross salary to estimated Italian net salary
+ai_analyzer.py           Optional OpenAI analysis and salary estimate enrichment
+dashboard_builder.py     Generates the interactive HTML dashboard
+requirements.txt         Required Python dependency list
+user_config.example.py   Shared local-config template
+user_config.py           Local ignored personal configuration
 
 scrapers/
-  __init__.py            Browser anti-detection, stealth, retry decorator
-  settings.py            Timeout, headless, tentativi (override da env SCRAPER_*)
-  page_guard.py          Cookie banner per dominio, rilevamento login/captcha
-  session.py             Login manuale (--auth) e sessioni salvate in profile/
-  site_report.py         Stato per sito, scan_report.json, screenshot di debug
-  jobs_ch.py             jobs.ch
-  carriera_ch.py         carriera.ch
-  gigroup_ch.py          gi group switzerland
-  randstad_ch.py         randstad.ch
-  orienta_ch.py          orienta.ch
-  jobscout24_ch.py       jobscout24.ch
-  indeed_ch.py           indeed.ch
-  adecco_ch.py           adecco.com/it-ch
-  manpower_ch.py         manpower.ch
-  linkedin_ch.py         linkedin.com/jobs (Ticino)
-  frontaliereticino_ch.py frontaliereticino.ch (indice JSON, no browser)
-  monster_ch.py          monster.ch (disabilitato — portale non più attivo)
+  __init__.py            Browser setup, retry helper, description fetching
+  settings.py            Timeouts, headless mode, retry settings
+  page_guard.py          Cookie, login, and blocking detection
+  session.py             Manual auth flow and saved browser sessions
+  site_report.py         Site status records, scan_report.json, debug artifacts
+  *_ch.py                One scraper module per supported portal
 
-tests/                   48 test con pytest
+tests/
+  test_html_generator.py Dashboard generation smoke tests
+  test_filters.py        Filtering and normalization tests
+  test_distance.py       Distance tests
+  test_tax_calculator.py Salary/tax tests
+  test_robustness.py     Retry and guard behavior tests
 ```
 
-## Output
+A full run follows this flow:
 
-Dopo un run completo trovi nella cartella del progetto:
+1. Site scrapers collect raw jobs.
+2. `job_filter.filter_jobs` keeps supported Ticino locations and removes duplicates.
+3. Cached descriptions and AI results are reused when possible.
+4. Missing descriptions and contact emails are fetched.
+5. `ai_analyzer.analyze_jobs` enriches jobs when `OPENAI_API_KEY` is available.
+6. `dashboard_builder.generate_html` writes `index.html`.
 
-| File | Contenuto |
-|------|-----------|
-| `index.html` | Dashboard interattiva da aprire nel browser |
-| `jobs_cache.json` | Cache annunci con descrizioni e analisi AI |
-| `scan_report.json` | Stato per ogni sito (ok / empty / blocked / ecc.) |
-| `debug/` | Screenshot e HTML delle pagine problematiche |
+## Configuration
 
-## Configurazione
+Local personal configuration lives in `user_config.py`, copied from
+`user_config.example.py`.
 
-| Variabile d'ambiente | Default | Descrizione |
-|----------------------|---------|-------------|
-| `OPENAI_API_KEY` | — | Richiesta per l'analisi AI |
-| `SCRAPER_HEADLESS` | `0` | `1` = browser nascosto |
-| `SCRAPER_TIMEOUT_MS` | `30000` | Timeout navigazione in ms |
-| `SCRAPER_ATTEMPTS` | `2` | Tentativi per scraper (max 3) |
+| Name | Where | Purpose |
+|------|-------|---------|
+| `HOME_LAT` | `user_config.py` | Home latitude for distance estimates |
+| `HOME_LNG` | `user_config.py` | Home longitude for distance estimates |
+| `HOME_CITY` | `user_config.py` | Dashboard label used in `From {HOME_CITY}` |
+| `CANDIDATE_PROFILE` | `user_config.py` | Profile text sent to the AI analyzer |
+| `OPENAI_API_KEY` | environment | Enables OpenAI analysis |
+| `SCRAPER_HEADLESS` | environment | `1` runs the browser headlessly |
+| `SCRAPER_TIMEOUT_MS` | environment | Default navigation timeout |
+| `SCRAPER_ATTEMPTS` | environment | Retry attempts per scraper, capped by code |
 
-## Test
+Generated files are intentionally ignored:
+
+| Path | Contents |
+|------|----------|
+| `index.html` | Generated dashboard |
+| `jobs_cache.json` | Cached jobs, descriptions, emails, and AI results |
+| `scan_report.json` | Per-site scan status |
+| `debug/` | Debug screenshots and page snapshots |
+| `profile/` | Saved browser auth sessions and cookies |
+
+## Testing
+
+Run the focused dashboard tests:
+
+```bash
+python -m pytest tests/test_html_generator.py -q
+```
+
+Compile the dashboard builder:
+
+```bash
+python -m py_compile dashboard_builder.py
+```
+
+Run the full test suite:
 
 ```bash
 python -m pytest tests/ -v
 ```
 
-48 test coprono: filtri comuni, normalizzazione URL/città, generazione HTML, calcolo distanze, calcolo stipendio netto, retry decorator, rilevamento cookie/captcha/login gate.
+The test suite covers filtering, city and URL normalization, dashboard HTML,
+distance calculation, salary calculation, retries, and page guard behavior.
 
-## Note legali
+## Privacy And GitHub Hygiene
 
-Lo scraper usa solo endpoint pubblici e non automatizza mai login. Per LinkedIn e Indeed, il login si esegue manualmente una volta (`--auth linkedin`) e la sessione viene riutilizzata. Non vengono creati account finti né aggirate misure di sicurezza.
+Do not commit `user_config.py`; it contains personal coordinates and the AI
+profile. Use `user_config.example.py` as the shared template.
+
+Do not commit generated caches, browser profiles, debug screenshots, or HTML
+outputs. They can contain personal settings, cookies, contact emails, scraped
+content, or transient site data.
+
+Set `OPENAI_API_KEY` as an environment variable instead of writing it into source
+files. Review `jobs_cache.json` locally before sharing any logs or artifacts,
+because AI prompts and scraped descriptions may include personal or copyrighted
+content from job portals.
+
+GitHub contributors are determined from commit metadata. Keep documentation
+focused on setup, usage, and project behavior rather than adding manual
+contributor text.
+
+## Legal Notes
+
+The scraper reads public pages and does not create fake accounts. For portals
+that require a user session, use the manual `--auth` flow and follow the portal's
+terms. Site structure and access controls can change; check `scan_report.json`
+and `debug/` when a scraper starts returning empty or blocked results.

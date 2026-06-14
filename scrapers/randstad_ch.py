@@ -1,14 +1,16 @@
 """
-Scraper per Randstad Svizzera (www.randstad.ch/it/lavoro/re-ticino/)
+Scraper for Randstad Switzerland (www.randstad.ch/it/lavoro/re-ticino/)
 
-Struttura verificata live:
-- URL lista: /it/lavoro/re-ticino/ → 38 annunci Ticino
-- Titolo:  a[href con UUID] > h3
-- Città:   riga "City, Ticino" nel testo del card
-- Data:    riga "D. Mese YYYY" (es. "9. Giugno 2026")
-- URL:     link relativo, base https://www.randstad.ch
-- Azienda: sempre "Randstad SA"
+Live structure:
+- List URL: /it/lavoro/re-ticino/ -> 38 Ticino jobs
+- Title:    a[href with UUID] > h3
+- City:     "City, Ticino" line in card text
+- Date:     "D. Month YYYY" line, for example "9. Giugno 2026"
+- URL:      relative link, base https://www.randstad.ch
+- Company:  always "Randstad SA"
 """
+
+from playwright.sync_api import BrowserContext
 
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, click_load_more, retry
 from job_filter import categorize_job
@@ -16,10 +18,10 @@ from job_filter import categorize_job
 BASE_URL = "https://www.randstad.ch"
 LIST_URL = "https://www.randstad.ch/it/lavoro/re-ticino/"
 
-# Estrazione via JS: più affidabile dei CSS selector con classi dinamiche
+# JS extraction is more reliable than CSS selectors with dynamic classes.
 _JS_EXTRACT = """
 () => {
-  const MESI = {
+  const MONTHS_IT = {
     'gennaio':1,'febbraio':2,'marzo':3,'aprile':4,'maggio':5,'giugno':6,
     'luglio':7,'agosto':8,'settembre':9,'ottobre':10,'novembre':11,'dicembre':12
   };
@@ -33,18 +35,18 @@ _JS_EXTRACT = """
 
     const title = (a.querySelector('h3') || {}).innerText || '';
 
-    // Riga "Città, Cantone" (contiene virgola e spazio)
+    // "City, Canton" line, detected by comma plus space.
     const cityLine = lines.find(l => l.includes(', ')) || '';
     const city = cityLine.split(',')[0].trim();
 
-    // Riga con la data → "D. Mese YYYY"
+    // Date line -> "D. Month YYYY".
     const dateLine = lines.find(l => /\\d+\\.\\s+\\w+\\s+\\d{4}/.test(l)) || '';
     const dm = dateLine.match(/(\\d+)\\.\\s+(\\w+)\\s+(\\d{4})/);
     let date = dateLine;
     if (dm) {
-      const mes = MESI[dm[2].toLowerCase()];
-      if (mes) {
-        date = dm[3] + '-' + String(mes).padStart(2, '0') + '-' + dm[1].padStart(2, '0');
+      const month = MONTHS_IT[dm[2].toLowerCase()];
+      if (month) {
+        date = dm[3] + '-' + String(month).padStart(2, '0') + '-' + dm[1].padStart(2, '0');
       }
     }
 
@@ -60,11 +62,11 @@ _JS_EXTRACT = """
 
 
 @retry()
-def scrape_randstad_ch(context) -> list:
+def scrape_randstad_ch(context: BrowserContext) -> list[dict[str, str]]:
     all_jobs = []
     page = new_stealth_page(context)
     try:
-        print(f"  [randstad.ch] Carico offerte Ticino…")
+        print("  [randstad.ch] Loading Ticino jobs...")
         page.goto(LIST_URL, wait_until="domcontentloaded", timeout=30000)
         dismiss_cookie_dialog(page)
         page.wait_for_timeout(2000)
@@ -72,8 +74,8 @@ def scrape_randstad_ch(context) -> list:
         human_scroll(page)
         page.wait_for_timeout(1500)
 
-        # Il banner OneTrust può comparire in ritardo e intercettare i click
-        # del load-more: seconda passata di dismissione appena prima dei click
+        # OneTrust can appear late and intercept load-more clicks, so run a
+        # second dismissal pass right before clicking.
         dismiss_cookie_dialog(page)
 
         _COUNT_JS = (
@@ -85,7 +87,7 @@ def scrape_randstad_ch(context) -> list:
             btn_texts=["Visualizza altri", "Mostra altri", "Carica altri"],
             count_js=_COUNT_JS,
         )
-        print(f"  [randstad.ch] {total} link-annuncio nel DOM dopo load-more")
+        print(f"  [randstad.ch] {total} job links in the DOM after load-more")
 
         jobs_raw = page.evaluate(_JS_EXTRACT)
 
@@ -105,7 +107,7 @@ def scrape_randstad_ch(context) -> list:
                 "source":   "randstad.ch",
             })
 
-        print(f"  [randstad.ch] {len(all_jobs)} annunci trovati")
+        print(f"  [randstad.ch] {len(all_jobs)} jobs found")
     finally:
         page.close()
 

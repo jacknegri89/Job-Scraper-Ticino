@@ -113,13 +113,13 @@ def test_auth_gate_da_titolo_indeed():
     page = FakePage(url="https://ch.indeed.com/jobs?start=15",
                     title="Accedi | Account Indeed")
     reason = detect_auth_gate(page)
-    assert reason is not None and "titolo" in reason
+    assert reason is not None and "title" in reason
 
 
 def test_auth_gate_da_form_password():
     page = FakePage(selectors={'input[type="password"]': FakeElement()})
     reason = detect_auth_gate(page)
-    assert reason == "form password visibile"
+    assert reason == "visible password form"
 
 
 def test_auth_gate_pagina_normale():

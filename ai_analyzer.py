@@ -1,64 +1,79 @@
-# Analisi AI degli annunci tramite OpenAI (gpt-4o-mini).
-# Richiede la variabile d'ambiente OPENAI_API_KEY.
-#
-# Aggiunge a ogni annuncio:
-#   llm_adatto      (bool|None) — True/False se analizzato, None se la chiamata fallisce
-#   llm_motivo      (str)       — breve spiegazione (~10 parole)
-#   llm_descrizione (str)       — 4-5 frasi su cosa si fa concretamente
-#   llm_stipendio_lordo (int|None) — stima CHF/mese
+"""AI job analysis through OpenAI (gpt-4o-mini)."""
 
+from __future__ import annotations
+
+import importlib
+import json
 import os
 import re
-import json
 import time
+from typing import Any
 
-_DELAY_BETWEEN_CALLS = 1.5   # secondi tra chiamate (limite Tier 1: 500 RPM)
-_MAX_RETRY           = 4
-_RATE_LIMIT_WAIT     = 20    # secondi di attesa base al 429 transitorio
+# Requires the OPENAI_API_KEY environment variable.
+#
+# Adds these compatibility keys to each job:
+#   llm_adatto             (bool | None) - True/False when analyzed, None on failure
+#   llm_motivo             (str)         - short explanation
+#   llm_descrizione        (str)         - 4-5 concrete sentences about the job
+#   llm_stipendio_lordo    (int | None)  - estimated gross CHF/month
 
-# Profilo del candidato inviato al modello come contesto.
-PROFILO = """
-Giacomo, 20 anni, Barlassina (MB). Cerca lavoro full-time frontaliero Ticino.
-Primo impiego assoluto: unica esperienza è uno stage scolastico di 1 mese (non retribuito,
-parte del percorso scolastico). Nessuna esperienza lavorativa remunerata.
-Diploma informatica 2026. Lingue di programmazione studiate a scuola: C++, C#, Python,
-Java, JavaScript, HTML, PHP, Assembly.
-Auto propria. Inglese B1.
+Job = dict[str, Any]
+JsonObject = dict[str, Any]
 
-NON ADATTO se anche solo uno di questi:
-- Richiede laurea (medicina, psicologia, legge, farmacia, fisioterapia, ecc.) o PhD
-- Titolo protetto: medico, psicologo, infermiere, farmacista, fisioterapista, avvocato
-- Stage riservato a studenti universitari di discipline specifiche
-- Residenza svizzera obbligatoria (permesso B/C esplicito)
-- Richiede 1+ anni di esperienza lavorativa concreta (non stage scolastico)
-
-ADATTO in tutti gli altri casi: operaio, magazzino, pulizie, ristorazione, retail,
-IT junior/helpdesk/junior dev, assemblaggio, logistica, ecc.
-Per ruoli IT: adatto anche se richiedono linguaggi che conosce (C++, C#, Python,
-Java, JS, HTML, PHP, Assembly), purché non richiedano anni di esperienza professionale.
-"""
-
-_SYSTEM_MSG = (
-    "Sei un consulente del lavoro italiano. Rispondi SOLO con JSON valido, nessun testo extra.\n"
-    f"Profilo candidato:\n{PROFILO}"
+_DELAY_BETWEEN_CALLS = 1.5
+_MAX_RETRIES = 4
+_RATE_LIMIT_WAIT = 20
+_PROFILE_ATTRS = ("CANDIDATE_PROFILE", "PROFILE")
+_GENERIC_CANDIDATE_PROFILE = (
+    "Generic candidate profile. Evaluate job fit from the job posting and any "
+    "candidate details supplied in user_config.py. Do not infer personal details "
+    "that are not explicitly provided."
 )
 
-_USER_PROMPT = """\
-Analizza questo annuncio di lavoro:
 
-{testo}
+class _QuotaExhaustedError(Exception):
+    """OpenAI credit is exhausted, so retrying this run is not useful."""
 
-Rispondi con questo JSON (tutti i campi obbligatori):
+
+def _load_candidate_profile() -> str:
+    try:
+        config = importlib.import_module("user_config")
+    except ModuleNotFoundError as exc:
+        if exc.name == "user_config":
+            return _GENERIC_CANDIDATE_PROFILE
+        raise
+
+    profile_text = ""
+    for attribute_name in _PROFILE_ATTRS:
+        profile_text = str(getattr(config, attribute_name, "") or "").strip()
+        if profile_text:
+            break
+    return profile_text or _GENERIC_CANDIDATE_PROFILE
+
+
+def _build_system_message(candidate_profile: str) -> str:
+    return (
+        "You are an employment consultant. Return only valid JSON with no extra text.\n"
+        "Candidate profile from local user_config.py:\n"
+        f"{candidate_profile}"
+    )
+
+
+_CANDIDATE_PROFILE = _load_candidate_profile()
+_SYSTEM_MESSAGE = _build_system_message(_CANDIDATE_PROFILE)
+
+_USER_PROMPT_TEMPLATE = """\
+Analyze this job posting:
+
+{job_text}
+
+Return this JSON object. All fields are required and values must be in English:
 {
-  "adatto": true o false,
-  "motivo": "max 12 parole: motivo principale. Se adatto: punto di forza (es: lavoro manuale, no laurea, patente B sufficiente). Se non adatto: ostacolo preciso (es: richiede laurea triennale, residenza CH, 5 anni esperienza).",
-  "descrizione": "Rispondi con 4-5 frasi CONCRETE e SPECIFICHE:\n1. Cosa si fa fisicamente ogni giorno (azioni, strumenti, macchine, ambienti).\n2. Orari/turni/contratto se visibili nell'annuncio.\n3. Competenze o certificati esplicitamente richiesti.\n4. Perché Giacomo (diploma informatica, stage IoT/saldatura/logistica, neolaureato, frontaliero) è adatto O quale specifica barriera lo esclude.",
-  "stipendio_lordo": numero intero CHF/mese stimato (es. 3200) oppure null se non deducibile. Basa la stima sul ruolo, settore e livello entry-level in Canton Ticino. Usa i contratti collettivi svizzeri tipici per il settore.
+  "suitable": true or false,
+  "reason": "max 12 words: the main reason. If suitable, state the main strength. If not suitable, state the exact blocker.",
+  "description": "Write 4-5 concrete and specific sentences:\n1. What the worker physically does each day, including actions, tools, machines, and environments.\n2. Working hours, shifts, or contract type when visible in the posting.\n3. Explicitly required skills, certificates, or permits.\n4. Why the configured candidate profile fits, or which specific barrier excludes it.",
+  "gross_salary": estimated gross CHF/month as an integer (example: 3200), or null if not inferable. Base the estimate on the role, sector, and entry-level pay in Ticino, using common Swiss collective agreements when applicable.
 }"""
-
-
-class _QuotaEsaurita(Exception):
-    """Credito OpenAI esaurito: inutile ritentare."""
 
 
 def _is_quota_exhausted(exc: Exception) -> bool:
@@ -66,107 +81,135 @@ def _is_quota_exhausted(exc: Exception) -> bool:
 
 
 def _is_rate_limit(exc: Exception) -> bool:
-    s = str(exc).lower()
-    return any(k in s for k in ("429", "rate_limit", "rate limit", "too many"))
+    text = str(exc).lower()
+    return any(marker in text for marker in ("429", "rate_limit", "rate limit", "too many"))
 
 
-def _stipendio_valido(raw) -> int | None:
-    # Il modello a volte risponde con null, stringhe o zero: accetta solo int > 0.
+def _valid_gross_salary(raw: Any) -> int | None:
+    if isinstance(raw, bool):
+        return None
     if isinstance(raw, (int, float)) and raw > 0:
         return int(raw)
     return None
 
 
-def _applica_risposta(job: dict, result: dict) -> None:
-    job["llm_adatto"]          = bool(result.get("adatto", True))
-    job["llm_motivo"]          = str(result.get("motivo", ""))[:120]
-    job["llm_descrizione"]     = str(result.get("descrizione", ""))[:2000]
-    job["llm_stipendio_lordo"] = _stipendio_valido(result.get("stipendio_lordo"))
+def _apply_llm_result(job: Job, result: JsonObject) -> None:
+    suitable = result.get("suitable", result.get("adatto", True))
+    reason = result.get("reason", result.get("motivo", ""))
+    description = result.get("description", result.get("descrizione", ""))
+    gross_salary = result.get("gross_salary", result.get("stipendio_lordo"))
+
+    job["llm_adatto"] = bool(suitable)
+    job["llm_motivo"] = str(reason)[:120]
+    job["llm_descrizione"] = str(description)[:2000]
+    job["llm_stipendio_lordo"] = _valid_gross_salary(gross_salary)
 
 
-def _testo_annuncio(job: dict) -> str:
-    descrizione = job.get("description", "").strip()
-    righe = (
-        f"Titolo: {job.get('title', '—')}\n"
-        f"Azienda: {job.get('company', '—')}\n"
-        f"Città: {job.get('city', '—')}\n"
-        f"Categoria: {job.get('category', '—')}\n"
+def _job_text(job: Job) -> str:
+    description = str(job.get("description") or "").strip()
+    lines = (
+        f"Title: {job.get('title', '-')}\n"
+        f"Company: {job.get('company', '-')}\n"
+        f"City: {job.get('city', '-')}\n"
+        f"Category: {job.get('category', '-')}\n"
     )
-    if descrizione:
-        righe += f"Descrizione completa:\n{descrizione[:1500]}"
-    return righe
+    if description:
+        lines += f"Full description:\n{description[:1500]}"
+    return lines
 
 
-def _chiedi_llm(client, job: dict, job_idx: int) -> dict:
-    user_content = _USER_PROMPT.replace("{testo}", _testo_annuncio(job))
+def _strip_json_fence(content: str) -> str:
+    content = re.sub(r"^```(?:json)?\s*", "", content.strip())
+    return re.sub(r"\s*```$", "", content).strip()
 
+
+def _decode_model_json(content: str) -> JsonObject:
+    parsed = json.loads(_strip_json_fence(content))
+    if not isinstance(parsed, dict):
+        raise ValueError("model response must be a JSON object")
+    return parsed
+
+
+def _request_llm_analysis(client: Any, job: Job, job_index: int) -> Job:
+    user_content = _USER_PROMPT_TEMPLATE.replace("{job_text}", _job_text(job))
     wait = _RATE_LIMIT_WAIT
-    for attempt in range(1, _MAX_RETRY + 1):
+
+    for attempt in range(1, _MAX_RETRIES + 1):
         try:
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": _SYSTEM_MSG},
-                    {"role": "user",   "content": user_content},
+                    {"role": "system", "content": _SYSTEM_MESSAGE},
+                    {"role": "user", "content": user_content},
                 ],
                 temperature=0.0,
                 max_tokens=700,
                 response_format={"type": "json_object"},
             )
-            contenuto = response.choices[0].message.content
-            if not contenuto:
-                raise ValueError("risposta vuota dal modello")
-            # Rimuove i backtick che il modello a volte aggiunge attorno al JSON
-            contenuto = re.sub(r'^```(?:json)?\s*', '', contenuto.strip())
-            contenuto = re.sub(r'\s*```$',          '', contenuto).strip()
-            _applica_risposta(job, json.loads(contenuto))
+            content = response.choices[0].message.content
+            if not content:
+                raise ValueError("model returned an empty response")
+            _apply_llm_result(job, _decode_model_json(content))
             return job
 
-        except json.JSONDecodeError as e:
-            if attempt < _MAX_RETRY:
-                print(f"  [LLM] #{job_idx} JSON malformato (tent. {attempt}/{_MAX_RETRY}) — riprovo…")
+        except (json.JSONDecodeError, ValueError) as exc:
+            if attempt < _MAX_RETRIES:
+                print(
+                    f"  [LLM] #{job_index} invalid JSON "
+                    f"(attempt {attempt}/{_MAX_RETRIES}); retrying."
+                )
                 time.sleep(2)
             else:
-                print(f"  [LLM] #{job_idx} ERRORE JSON: {str(e)[:100]}")
+                short_error = str(exc)[:120].replace("\n", " ")
+                print(
+                    f"  [LLM] #{job_index} JSON error: {short_error}. "
+                    "This job will be left unanalyzed and can be retried on the next run."
+                )
                 break
-        except Exception as e:
-            if _is_quota_exhausted(e):
-                raise _QuotaEsaurita(str(e)[:200])
-            if _is_rate_limit(e) and attempt < _MAX_RETRY:
-                print(f"  [LLM] #{job_idx} rate-limit (tent. {attempt}/{_MAX_RETRY})"
-                      f" — attendo {wait}s…")
+        except Exception as exc:
+            if _is_quota_exhausted(exc):
+                raise _QuotaExhaustedError(str(exc)[:200]) from exc
+            if _is_rate_limit(exc) and attempt < _MAX_RETRIES:
+                print(
+                    f"  [LLM] #{job_index} rate-limited "
+                    f"(attempt {attempt}/{_MAX_RETRIES}); waiting {wait}s before retry."
+                )
                 time.sleep(wait)
                 wait = min(wait * 2, 120)
             else:
-                short_err = str(e)[:150].replace("\n", " ")
-                print(f"  [LLM] #{job_idx} ERRORE: {type(e).__name__}: {short_err}")
+                short_error = str(exc)[:150].replace("\n", " ")
+                print(
+                    f"  [LLM] #{job_index} API error: {type(exc).__name__}: {short_error}. "
+                    "Check the API key, network, and model access before retrying."
+                )
                 break
 
-    job["llm_adatto"]      = None
-    job["llm_motivo"]      = ""
+    job["llm_adatto"] = None
+    job["llm_motivo"] = ""
     job["llm_descrizione"] = ""
+    job["llm_stipendio_lordo"] = None
     return job
 
 
-def _set_defaults(jobs: list) -> list:
+def _set_defaults(jobs: list[Job]) -> list[Job]:
     for job in jobs:
-        job.setdefault("llm_adatto",          None)
-        job.setdefault("llm_motivo",          "")
-        job.setdefault("llm_descrizione",     "")
+        job.setdefault("llm_adatto", None)
+        job.setdefault("llm_motivo", "")
+        job.setdefault("llm_descrizione", "")
         job.setdefault("llm_stipendio_lordo", None)
     return jobs
 
 
-def analyze_jobs(jobs: list) -> list:
-    # Se OPENAI_API_KEY non è impostata o il pacchetto manca, restituisce la lista invariata.
+def analyze_jobs(jobs: list[Job]) -> list[Job]:
+    """Analyze jobs with the LLM while preserving the existing public function."""
     if not os.environ.get("OPENAI_API_KEY"):
-        print("[LLM] OPENAI_API_KEY non trovata — analisi AI saltata.")
+        print("[LLM] OPENAI_API_KEY is not set; skipping AI analysis. Set it and rerun.")
         return _set_defaults(jobs)
 
     try:
         from openai import OpenAI
     except ImportError:
-        print("[LLM] Pacchetto 'openai' non installato — analisi saltata.")
+        print("[LLM] Package 'openai' is not installed; run 'pip install -r requirements.txt' and rerun.")
         return _set_defaults(jobs)
 
     if not jobs:
@@ -174,39 +217,47 @@ def analyze_jobs(jobs: list) -> list:
 
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
-    da_fare = sum(1 for j in jobs if j.get("llm_adatto") is None)
-    if da_fare < len(jobs):
-        print(f"[LLM] {len(jobs) - da_fare} annunci già analizzati in cache — analizzo solo i {da_fare} mancanti.")
-    stima = int(da_fare * _DELAY_BETWEEN_CALLS / 60) + 1
-    print(f"[LLM] Analisi AI di {da_fare} annunci (stima: ~{stima} min) — gpt-4o-mini…")
+    pending_count = sum(1 for job in jobs if job.get("llm_adatto") is None)
+    if pending_count < len(jobs):
+        cached_count = len(jobs) - pending_count
+        print(f"[LLM] {cached_count} jobs already analyzed in cache; analyzing {pending_count} missing jobs.")
 
-    analizzati = []
+    estimated_minutes = int(pending_count * _DELAY_BETWEEN_CALLS / 60) + 1
+    print(f"[LLM] AI analysis for {pending_count} jobs (estimate: ~{estimated_minutes} min); gpt-4o-mini.")
+
+    analyzed_jobs: list[Job] = []
     try:
-        for i, job in enumerate(jobs, start=1):
-            # Annuncio già analizzato in cache: non ripagare la chiamata API.
+        for index, job in enumerate(jobs, start=1):
             if job.get("llm_adatto") is not None:
-                analizzati.append(job)
+                analyzed_jobs.append(job)
                 continue
+
             try:
-                analizzati.append(_chiedi_llm(client, job, i))
-            except _QuotaEsaurita as e:
-                print(f"  [LLM] QUOTA ESAURITA: {e}")
-                print("  [LLM] Ricarica il credito su platform.openai.com e rilancia: python scraper.py --reanalyze")
+                analyzed_jobs.append(_request_llm_analysis(client, job, index))
+            except _QuotaExhaustedError as exc:
+                print(f"  [LLM] quota exhausted: {exc}")
+                print("  [LLM] Add credit or update billing at platform.openai.com, then rerun with --reanalyze.")
                 break
-            if i < len(jobs):
+
+            if index < len(jobs):
                 time.sleep(_DELAY_BETWEEN_CALLS)
-            if i % 10 == 0 or i == len(jobs):
-                ok = sum(1 for j in analizzati if j.get("llm_adatto") is not None)
-                print(f"  [LLM] {i}/{len(jobs)} — {ok} analizzati con successo")
+            if index % 10 == 0 or index == len(jobs):
+                successful_count = sum(1 for job in analyzed_jobs if job.get("llm_adatto") is not None)
+                print(f"  [LLM] {index}/{len(jobs)}; {successful_count} analyzed successfully.")
     except KeyboardInterrupt:
-        print(f"\n  [LLM] Interrotto (Ctrl+C) dopo {len(analizzati)} annunci — salvo i risultati parziali.")
+        print(
+            f"\n  [LLM] Interrupted with Ctrl+C after {len(analyzed_jobs)} jobs; "
+            "saving partial results."
+        )
 
-    # Gli annunci non processati escono con i default, così --reanalyze riparte da qui.
-    if len(analizzati) < len(jobs):
-        analizzati.extend(_set_defaults(jobs[len(analizzati):]))
+    if len(analyzed_jobs) < len(jobs):
+        analyzed_jobs.extend(_set_defaults(jobs[len(analyzed_jobs) :]))
 
-    adatti     = sum(1 for j in analizzati if j.get("llm_adatto") is True)
-    non_adatti = sum(1 for j in analizzati if j.get("llm_adatto") is False)
-    non_anal   = sum(1 for j in analizzati if j.get("llm_adatto") is None)
-    print(f"[LLM] {adatti} adatti · {non_adatti} non adatti · {non_anal} non analizzati.")
-    return analizzati
+    suitable_count = sum(1 for job in analyzed_jobs if job.get("llm_adatto") is True)
+    unsuitable_count = sum(1 for job in analyzed_jobs if job.get("llm_adatto") is False)
+    unanalyzed_count = sum(1 for job in analyzed_jobs if job.get("llm_adatto") is None)
+    print(
+        f"[LLM] {suitable_count} suitable; "
+        f"{unsuitable_count} unsuitable; {unanalyzed_count} unanalyzed."
+    )
+    return analyzed_jobs

@@ -2,10 +2,14 @@ import re
 import random
 import time
 import functools
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, ParamSpec, TypeVar
+
+from playwright.sync_api import Browser, BrowserContext, Page, Playwright
 
 _EMAIL_RE    = re.compile(r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,10}\b')
-# Indirizzi sistematici da ignorare: noreply, sistemi ATS, portali di job
+# System addresses to ignore: noreply senders, ATS systems, and job portals.
 _EMAIL_NOISE = (
     "noreply", "no-reply", "donotreply", "do-not-reply",
     "postmaster", "mailer-daemon", "bounce", "notifications@",
@@ -13,17 +17,18 @@ _EMAIL_NOISE = (
     "gigroup", "carriera.ch", "monster.ch", "adecco.ch", "manpower.ch",
 )
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
 
 def extract_email(text: str) -> str:
-    """Restituisce il primo indirizzo email utile nel testo (filtra sistemi automatici)."""
+    """Return the first usable email address in text, excluding automated systems."""
     for m in _EMAIL_RE.finditer(text):
         email = m.group().lower()
         if not any(noise in email for noise in _EMAIL_NOISE):
             return email
     return ""
 
-
-from playwright.sync_api import Playwright, BrowserContext
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -44,7 +49,7 @@ PROFILE_DIR = Path(__file__).parent.parent / "profile"
 SESSION_FILE = PROFILE_DIR / "state.json"
 
 
-def create_browser_context(playwright: Playwright, headless: bool = None) -> tuple:
+def create_browser_context(playwright: Playwright, headless: bool | None = None) -> tuple[Browser, BrowserContext]:
     """Launch Chrome with maximum anti-detection settings. Returns (browser, context)."""
     from scrapers.settings import HEADLESS
     if headless is None:
@@ -65,7 +70,7 @@ def create_browser_context(playwright: Playwright, headless: bool = None) -> tup
         ],
     )
 
-    context_kwargs = {
+    context_kwargs: dict[str, Any] = {
         "user_agent": ua,
         "viewport": viewport,
         "locale": "it-CH",
@@ -76,14 +81,14 @@ def create_browser_context(playwright: Playwright, headless: bool = None) -> tup
         context_kwargs["storage_state"] = str(SESSION_FILE)
 
     context = browser.new_context(**context_kwargs)
-    # Default per le chiamate senza timeout esplicito (i goto degli scraper
-    # passano comunque il proprio timeout, che ha la precedenza)
+    # Default for calls without an explicit timeout; scraper goto calls can
+    # still pass their own timeout, which takes precedence.
     from scrapers.settings import PAGE_TIMEOUT_MS
     context.set_default_navigation_timeout(PAGE_TIMEOUT_MS)
     return browser, context
 
 
-def new_stealth_page(context: BrowserContext):
+def new_stealth_page(context: BrowserContext) -> Page:
     """Create a page with playwright-stealth patches applied."""
     from playwright_stealth import Stealth
     page = context.new_page()
@@ -95,11 +100,11 @@ def new_stealth_page(context: BrowserContext):
     return page
 
 
-def human_delay(min_s: float = 3.0, max_s: float = 8.0):
+def human_delay(min_s: float = 3.0, max_s: float = 8.0) -> None:
     time.sleep(random.uniform(min_s, max_s))
 
 
-def human_scroll(page):
+def human_scroll(page: Page) -> None:
     """Scroll gradually to simulate a human reading the page."""
     page.evaluate(
         "() => new Promise(resolve => {"
@@ -115,19 +120,24 @@ def human_scroll(page):
     )
 
 
-def click_load_more(page, btn_texts, count_js, max_clicks=30, wait_ms=3000):
+def click_load_more(
+    page: Page,
+    btn_texts: list[str],
+    count_js: str,
+    max_clicks: int = 30,
+    wait_ms: int = 3000,
+) -> int:
     """
-    Clicca ripetutamente un pulsante "carica altri" finché:
-    - nessun pulsante è visibile, oppure
-    - il conteggio degli elementi DOM (count_js) non cresce per 2 cicli di fila.
+    Repeatedly click a load-more button until:
+    - no button is visible, or
+    - the DOM element count (count_js) does not grow for 2 consecutive cycles.
 
-    btn_texts : lista di testi da cercare nel pulsante (primo match vince)
-    count_js  : snippet JS che ritorna il numero attuale di elementi nella pagina
-                (usato per capire se il click ha caricato nuovi risultati)
-    max_clicks: sicurezza anti-loop-infinito
-    wait_ms   : millisecondi di attesa dopo ogni click
+    btn_texts : button labels to try; first visible match wins
+    count_js  : JS snippet returning the current item count
+    max_clicks: loop guard
+    wait_ms   : milliseconds to wait after each click
 
-    Esempio uso:
+    Example:
         click_load_more(
             page,
             btn_texts=["Visualizza altri", "Mostra altri"],
@@ -147,15 +157,15 @@ def click_load_more(page, btn_texts, count_js, max_clicks=30, wait_ms=3000):
                     btn = b
                     break
             except Exception as e:
-                print(f"    [load-more] query_selector('{text}') fallito: {e}")
+                print(f"    [load-more] query_selector('{text}') failed: {e}")
 
         if btn is None:
-            break   # Pulsante sparito → tutti i risultati visibili
+            break   # Button disappeared: all results are visible.
 
         try:
             btn.click()
         except Exception as e:
-            print(f"    [load-more] btn.click() fallito al click #{click_n}: {e}")
+            print(f"    [load-more] btn.click() failed on click #{click_n}: {e}")
             break
 
         page.wait_for_timeout(wait_ms)
@@ -164,12 +174,12 @@ def click_load_more(page, btn_texts, count_js, max_clicks=30, wait_ms=3000):
 
         new_count = page.evaluate(count_js)
         delta = new_count - prev_count
-        print(f"    [load-more] click #{click_n}: {prev_count}→{new_count} ({delta:+d})")
+        print(f"    [load-more] click #{click_n}: {prev_count}->{new_count} ({delta:+d})")
 
         if new_count <= prev_count:
             no_change += 1
             if no_change >= 2:
-                break   # 2 click senza nuovi elementi → fermati
+                break   # Stop after 2 clicks without new items.
         else:
             no_change = 0
 
@@ -178,17 +188,16 @@ def click_load_more(page, btn_texts, count_js, max_clicks=30, wait_ms=3000):
     return prev_count
 
 
-def dismiss_cookie_dialog(page, site: str = ""):
-    """Chiude il banner cookie (regole per dominio + fallback). Vedi page_guard.py."""
+def dismiss_cookie_dialog(page: Page, site: str = "") -> str | None:
+    """Close the cookie banner using domain rules plus fallback selectors."""
     from scrapers.page_guard import dismiss_cookies
     return dismiss_cookies(page, site)
 
 
-def fetch_description(context: BrowserContext, url: str, max_chars: int = 3000) -> dict:
+def fetch_description(context: BrowserContext, url: str, max_chars: int = 3000) -> dict[str, str]:
     """
-    Apre la pagina dell'annuncio.
-    Ritorna {"description": str, "email": str}.
-    L'email viene estratta dal testo completo PRIMA del troncamento.
+    Open a job page and return {"description": str, "email": str}.
+    Email extraction uses the full text before description truncation.
     """
     empty = {"description": "", "email": ""}
     if not url or not url.startswith(("https://", "http://")):
@@ -210,26 +219,26 @@ def fetch_description(context: BrowserContext, url: str, max_chars: int = 3000) 
             "article",
             "main",
         ]
-        testo = ""
+        description_text = ""
         for sel in selectors:
             el = page.query_selector(sel)
             if el:
-                testo = el.inner_text()
-                if len(testo.strip()) > 100:
+                description_text = el.inner_text()
+                if len(description_text.strip()) > 100:
                     break
 
-        if len(testo.strip()) < 100:
-            testo = page.evaluate("() => document.body.innerText")
+        if len(description_text.strip()) < 100:
+            description_text = page.evaluate("() => document.body.innerText")
 
-        lines = [l.strip() for l in testo.splitlines() if l.strip()]
-        testo_pulito = " | ".join(lines)
+        lines = [line.strip() for line in description_text.splitlines() if line.strip()]
+        clean_text = " | ".join(lines)
 
-        # Estrai email dal testo COMPLETO prima di troncare
-        email = extract_email(testo_pulito)
+        # Extract email from the full text before truncating the description.
+        email = extract_email(clean_text)
 
-        return {"description": testo_pulito[:max_chars], "email": email}
+        return {"description": clean_text[:max_chars], "email": email}
     except Exception as e:
-        print(f"  [DESC] errore su {url[:60]}: {type(e).__name__}")
+        print(f"  [DESC] error on {url[:60]}: {type(e).__name__}")
         return empty
     finally:
         if page:
@@ -239,29 +248,28 @@ def fetch_description(context: BrowserContext, url: str, max_chars: int = 3000) 
                 pass
 
 
-def save_session(context: BrowserContext):
+def save_session(context: BrowserContext) -> None:
     """Persist cookies and storage state for the next run."""
     PROFILE_DIR.mkdir(exist_ok=True)
     try:
         context.storage_state(path=str(SESSION_FILE))
-        print("[OK] Sessione salvata.")
+        print("[OK] Session saved.")
     except Exception as e:
-        print(f"[WARN] Impossibile salvare sessione: {e}")
+        print(f"[WARN] Could not save session: {e}")
 
 
-def retry(max_attempts: int = None):
+def retry(max_attempts: int | None = None) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """
-    Decorator per gli scraper: pochi tentativi, backoff breve.
+    Decorator for scrapers: few attempts, short backoff.
 
-    - max 2-3 tentativi (config.MAX_ATTEMPTS, sovrascrivibile per scraper)
-    - backoff 3s / 6s fra i tentativi
-    - errori irrecuperabili (browser chiuso, rete abortita) → nessun retry
-    - dopo l'ultimo fallimento solleva ScrapeError con stato classificato:
-      il runner la cattura, registra il sito nel report e prosegue.
+    - max 2-3 attempts (settings.MAX_ATTEMPTS, overrideable per scraper)
+    - 3s / 6s backoff between attempts
+    - unrecoverable errors (closed browser, aborted network) are not retried
+    - after the final failure, raises ScrapeError with a classified status
     """
-    def decorator(func):
+    def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             from scrapers.settings import MAX_ATTEMPTS, RETRY_BACKOFF_S
             from scrapers.site_report import classify_exception, ScrapeError
             attempts = min(max_attempts or MAX_ATTEMPTS, 3)
@@ -271,13 +279,13 @@ def retry(max_attempts: int = None):
                     return func(*args, **kwargs)
                 except Exception as e:
                     status, reason = classify_exception(e)
-                    # Irrecuperabile o ultimo tentativo → riporta al runner
+                    # Bubble unrecoverable errors or the final attempt to the runner.
                     if status in ("browser_closed", "network_error") or attempt == attempts - 1:
-                        print(f"[ERRORE] {func.__name__}: {status} — {reason}")
+                        print(f"[ERROR] {func.__name__}: {status} - {reason}")
                         raise ScrapeError(status, reason, attempt + 1) from e
                     delay = RETRY_BACKOFF_S[min(attempt, len(RETRY_BACKOFF_S) - 1)]
-                    print(f"[RETRY] {func.__name__} tentativo {attempt + 1}/{attempts}"
-                          f" fallito ({status}). Riprovo tra {delay}s…")
+                    print(f"[RETRY] {func.__name__} attempt {attempt + 1}/{attempts}"
+                          f" failed ({status}). Retrying in {delay}s...")
                     time.sleep(delay)
         return wrapper
     return decorator

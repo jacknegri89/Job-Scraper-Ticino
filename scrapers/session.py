@@ -1,24 +1,26 @@
-# Sessioni autenticate — MAI login automatici.
+# Authenticated sessions: NEVER automatic logins.
 #
-# Flusso:
+# Flow:
 #   1. python scraper.py --auth linkedin
-#   2. si apre un browser visibile sulla pagina di login
-#   3. l'utente fa login A MANO (funziona anche con 2FA)
-#   4. lo script rileva il login riuscito e salva lo storage state in profile/
-#   5. gli scraper riusano quella sessione nei run successivi
+#   2. a visible browser opens on the login page
+#   3. the user logs in MANUALLY, including any 2FA
+#   4. the script detects a successful login and saves storage state in profile/
+#   5. scrapers reuse that session in later runs
 #
-# Se la sessione manca o è scaduta, lo scraper segnala
-# "requires_manual_login" senza fallire e senza tentare aggiramenti.
+# If the session is missing or expired, the scraper reports
+# "requires_manual_login" without failing and without bypass attempts.
 
 from __future__ import annotations
 
 import time
 from pathlib import Path
 
+from playwright.sync_api import BrowserContext, Playwright
+
 from scrapers.settings import AUTH_DIR
 
-# Configurazione per sito autenticabile.
-AUTH_SITES: dict[str, dict] = {
+# Configuration for sites that can use a manual authenticated session.
+AUTH_SITES: dict[str, dict[str, str | tuple[str, ...]]] = {
     "linkedin": {
         "login_url":      "https://www.linkedin.com/login",
         "success_urls":   ("/feed", "linkedin.com/in/"),
@@ -33,13 +35,13 @@ AUTH_SITES: dict[str, dict] = {
     },
 }
 
-WAIT_LOGIN_S = 300   # massimo 5 minuti per il login manuale
+WAIT_LOGIN_S = 300   # Up to 5 minutes for manual login.
 
 
 def auth_state_path(site: str) -> Path:
     cfg = AUTH_SITES.get(site)
     if not cfg:
-        raise KeyError(f"Sito auth sconosciuto: {site!r}. Disponibili: {list(AUTH_SITES)}")
+        raise KeyError(f"Unknown auth site: {site!r}. Available: {list(AUTH_SITES)}")
     return AUTH_DIR / cfg["state_file"]
 
 
@@ -50,8 +52,8 @@ def has_auth_state(site: str) -> bool:
         return False
 
 
-def _is_logged_in(context, cfg: dict) -> bool:
-    # Login confermato dal cookie di sessione o dall'URL della pagina corrente.
+def _is_logged_in(context: BrowserContext, cfg: dict[str, str | tuple[str, ...]]) -> bool:
+    # Login is confirmed by the session cookie or the current page URL.
     try:
         cookies = context.cookies()
         if any(c.get("name") == cfg["success_cookie"] and c.get("value") for c in cookies):
@@ -68,20 +70,20 @@ def _is_logged_in(context, cfg: dict) -> bool:
     return False
 
 
-def run_auth_flow(playwright, site: str) -> bool:
-    # Apre un browser visibile per il login manuale e salva lo storage state.
-    # Ritorna True se la sessione è stata salvata con successo.
+def run_auth_flow(playwright: Playwright, site: str) -> bool:
+    # Open a visible browser for manual login and save storage state.
+    # Return True when the session was saved successfully.
     cfg = AUTH_SITES.get(site)
     if not cfg:
-        print(f"[AUTH] Sito sconosciuto: {site!r}. Disponibili: {', '.join(AUTH_SITES)}")
+        print(f"[AUTH] Unknown site: {site!r}. Available: {', '.join(AUTH_SITES)}")
         return False
 
     AUTH_DIR.mkdir(exist_ok=True)
     state_path = auth_state_path(site)
 
-    print(f"[AUTH] Apro {cfg['login_url']}")
-    print(f"[AUTH] Fai login manualmente nella finestra del browser.")
-    print(f"[AUTH] Hai {WAIT_LOGIN_S // 60} minuti; la sessione si salva da sola appena entri.")
+    print(f"[AUTH] Opening {cfg['login_url']}")
+    print("[AUTH] Log in manually in the browser window.")
+    print(f"[AUTH] You have {WAIT_LOGIN_S // 60} minutes; the session saves after login.")
 
     browser = playwright.chromium.launch(headless=False,
                                          args=["--disable-blink-features=AutomationControlled"])
@@ -94,13 +96,13 @@ def run_auth_flow(playwright, site: str) -> bool:
         while time.monotonic() < deadline:
             if _is_logged_in(context, cfg):
                 context.storage_state(path=str(state_path))
-                print(f"[AUTH] Login rilevato — sessione salvata in {state_path}")
+                print(f"[AUTH] Login detected - session saved in {state_path}")
                 return True
             time.sleep(2)
             if not context.pages:
-                break   # l'utente ha chiuso il browser manualmente
+                break   # The user manually closed the browser.
 
-        print("[AUTH] Login non rilevato entro il tempo massimo. Sessione NON salvata.")
+        print("[AUTH] Login was not detected before timeout. Session NOT saved.")
         return False
     finally:
         try:

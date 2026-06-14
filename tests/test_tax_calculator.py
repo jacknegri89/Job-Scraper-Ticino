@@ -1,40 +1,46 @@
-"""Test di sanità del calcolo netto frontaliero (stime, non valori esatti)."""
+"""Smoke tests for cross-border net salary estimates."""
 
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from salary_calculator import calcola_netto
+from salary_calculator import calculate_net_salary
 
 
-def test_input_non_valido_da_dizionario_vuoto():
-    assert calcola_netto(0) == {}
-    assert calcola_netto(-100) == {}
-    assert calcola_netto(None) == {}
+def test_invalid_input_returns_empty_dict() -> None:
+    assert calculate_net_salary(0) == {}
+    assert calculate_net_salary(-100) == {}
+    assert calculate_net_salary(None) == {}
 
 
-def test_netto_minore_del_lordo():
-    r = calcola_netto(4000)
-    assert 0 < r["netto_chf"] < 4000
-    assert 0 < r["netto_eur"] < r["netto_chf"] / 0.9   # cambio ~0.96
+def test_net_is_lower_than_gross() -> None:
+    result = calculate_net_salary(4000)
+    assert 0 < result["net_chf"] < 4000
+    assert 0 < result["net_eur"] < result["net_chf"] / 0.9
 
 
-def test_trattenute_positive():
-    r = calcola_netto(3500)
-    assert r["soc_chf"] > 0          # contributi sociali sempre dovuti
-    assert r["qs_chf"] > 0           # imposta alla fonte sempre dovuta
-    assert r["irpef_eur"] >= 0       # IRPEF può essere 0 (esenzione 10k CHF)
+def test_deductions_are_positive() -> None:
+    result = calculate_net_salary(3500)
+    assert result["social_chf"] > 0
+    assert result["withholding_chf"] > 0
+    assert result["extra_italian_tax_eur"] >= 0
 
 
-def test_stipendio_piu_alto_netto_piu_alto():
-    """Il calcolo deve essere monotono: più lordo → più netto."""
-    assert calcola_netto(5000)["netto_eur"] > calcola_netto(3000)["netto_eur"]
+def test_higher_gross_salary_has_higher_net_salary() -> None:
+    assert calculate_net_salary(5000)["net_eur"] > calculate_net_salary(3000)["net_eur"]
 
 
-def test_campi_tutti_presenti_e_interi():
-    r = calcola_netto(4200)
-    for campo in ("lordo_chf", "soc_chf", "qs_chf", "irpef_eur",
-                  "netto_chf", "netto_eur"):
-        assert campo in r
-        assert isinstance(r[campo], int)
+def test_all_fields_are_present_and_integer() -> None:
+    result = calculate_net_salary(4200)
+    expected_fields = (
+        "gross_chf",
+        "social_chf",
+        "withholding_chf",
+        "extra_italian_tax_eur",
+        "net_chf",
+        "net_eur",
+    )
+    for field in expected_fields:
+        assert field in result
+        assert isinstance(result[field], int)

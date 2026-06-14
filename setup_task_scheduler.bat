@@ -1,14 +1,14 @@
 @echo off
 setlocal enabledelayedexpansion
 
-echo Configurazione Task Scheduler Windows...
+echo Configuring Windows Task Scheduler...
 echo.
 
 for /f "delims=" %%i in ('python -c "import sys; print(sys.executable)"') do set PYTHON_PATH=%%i
 set SCRIPT_PATH=%~dp0main.py
 
 if not defined PYTHON_PATH (
-    echo [ERRORE] Python non trovato. Assicurati che Python sia installato nel PATH di sistema.
+    echo [ERROR] Python was not found. Make sure Python is installed and available in PATH.
     pause
     exit /b 1
 )
@@ -24,12 +24,12 @@ schtasks /create /tn "JobScraperFrontaliero" ^
 
 if !ERRORLEVEL! == 0 (
     echo.
-    echo [OK] Task creato! Lo script girera ogni mattina alle 08:00.
+    echo [OK] Task created. The scraper will run every morning at 08:00.
     echo.
-    echo Per rimuoverlo: schtasks /delete /tn "JobScraperFrontaliero"
+    echo To remove it: schtasks /delete /tn "JobScraperFrontaliero"
 ) else (
     echo.
-    echo [ERRORE] Creazione fallita. Prova a eseguire come Amministratore.
+    echo [ERROR] Task creation failed. Try running this file as Administrator.
 )
 echo.
 pause

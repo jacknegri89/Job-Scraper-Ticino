@@ -1,30 +1,32 @@
 """
-Scraper per LinkedIn Jobs (www.linkedin.com/jobs) — annunci in Ticino, CH.
+Scraper for LinkedIn Jobs (www.linkedin.com/jobs), focused on Ticino, CH.
 
-URL lista pubblica (senza login):
+Public list URL, without login:
   https://www.linkedin.com/jobs/search/?keywords=&location=Ticino%2C+Switzerland&start=N
 
-LinkedIn mostra annunci pubblicamente senza login; appare un modale di sign-in
-ma non blocca il DOM. Si usa anche l'endpoint guest API per evitare il modale:
+LinkedIn shows jobs publicly without login; a sign-in modal appears but does
+not block the DOM. The guest API can also avoid the modal:
   https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?...&start=N
 
-Struttura DOM confermata (2026-06) — pagina pubblica:
-  li.base-card                   → wrapper card
-  a.base-card__full-link         → anchor con href al job
-  h3.base-search-card__title     → titolo job
-  h4.base-search-card__subtitle a → azienda
-  span.job-search-card__location → città
-  time[datetime]                 → data ISO YYYY-MM-DD (attributo datetime)
-  (fallback: innerText relativo "3 weeks ago" etc.)
+Confirmed DOM structure (2026-06), public page:
+  li.base-card                    -> card wrapper
+  a.base-card__full-link          -> anchor with job href
+  h3.base-search-card__title      -> job title
+  h4.base-search-card__subtitle a -> company
+  span.job-search-card__location  -> city
+  time[datetime]                  -> ISO YYYY-MM-DD date (datetime attribute)
+  fallback: relative innerText such as "3 weeks ago"
 
-Paginazione: &start=0, &start=25, &start=50 … (25 risultati per pagina).
-MAX_PAGES = 5  →  125 annunci massimi per run.
+Pagination: &start=0, &start=25, &start=50 ... (25 results per page).
+MAX_PAGES = 5 -> 125 max jobs per run.
 
-Se rileva authwall/login redirect → restituisce [] senza eccezione.
+If an authwall/login redirect is detected, return [] without raising.
 """
 
 import re
 from datetime import date, timedelta
+
+from playwright.sync_api import BrowserContext, Page
 
 from scrapers import new_stealth_page, human_delay, human_scroll, retry
 from scrapers.session import has_auth_state, auth_state_path
@@ -33,14 +35,13 @@ from job_filter import categorize_job
 
 
 # ---------------------------------------------------------------------------
-# Costanti
+# Constants
 # ---------------------------------------------------------------------------
 BASE_URL  = "https://www.linkedin.com"
 LIST_URL  = "https://www.linkedin.com/jobs/search/"
-MAX_PAGES = 5   # 25 risultati × 5 = 125 max
+MAX_PAGES = 5   # 25 results x 5 = 125 max
 
-# Filtriamo per Ticino, Svizzera — incluse varianti di ricerca per massimizzare
-# la copertura del distretto di Mendrisio (Chiasso, Mendrisio, Stabio…)
+# Filter for Ticino, Switzerland.
 _SEARCH_LOCATION = "Ticino%2C+Switzerland"
 
 _BLOCKED_SIGNALS = (
@@ -53,8 +54,8 @@ _BLOCKED_SIGNALS = (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _is_blocked(page) -> bool:
-    """True se LinkedIn mostra un authwall o redirect al login."""
+def _is_blocked(page: Page) -> bool:
+    """Return True when LinkedIn shows an authwall or redirects to login."""
     try:
         url   = page.url.lower()
         title = page.title().lower()
@@ -65,14 +66,14 @@ def _is_blocked(page) -> bool:
 
 def _relative_to_date(text: str) -> str:
     """
-    Converte date relative/ISO in YYYY-MM-DD.
-    Gestisce sia l'attributo datetime (già ISO) sia testo come
+    Convert relative or ISO dates to YYYY-MM-DD.
+    Handles both the datetime attribute, already ISO, and text such as
     '3 weeks ago', '2 days ago', '1 month ago', 'just now'.
     """
     today = date.today()
     t = text.strip()
 
-    # Attributo datetime già in formato ISO YYYY-MM-DD
+    # datetime attribute already uses ISO YYYY-MM-DD.
     if re.match(r'^\d{4}-\d{2}-\d{2}', t):
         return t[:10]
 
@@ -80,11 +81,11 @@ def _relative_to_date(text: str) -> str:
     if not t_lower or "just" in t_lower or "now" in t_lower or "oggi" in t_lower:
         return today.isoformat()
 
-    # "X hours ago" / "X ore fa"
+    # "X hours ago" / "X ore fa".
     if re.search(r'\d+\s*(hour|ora|ore)', t_lower):
         return today.isoformat()
 
-    # "X days ago" / "X giorni fa"
+    # "X days ago" / "X giorni fa".
     m = re.search(r'(\d+)\s*day', t_lower)
     if m:
         return (today - timedelta(days=int(m.group(1)))).isoformat()
@@ -92,7 +93,7 @@ def _relative_to_date(text: str) -> str:
     if m:
         return (today - timedelta(days=int(m.group(1)))).isoformat()
 
-    # "X weeks ago" / "X settimane fa"
+    # "X weeks ago" / "X settimane fa".
     m = re.search(r'(\d+)\s*week', t_lower)
     if m:
         return (today - timedelta(weeks=int(m.group(1)))).isoformat()
@@ -100,7 +101,7 @@ def _relative_to_date(text: str) -> str:
     if m:
         return (today - timedelta(weeks=int(m.group(1)))).isoformat()
 
-    # "X months ago" / "X mesi fa"
+    # "X months ago" / "X mesi fa".
     m = re.search(r'(\d+)\s*month', t_lower)
     if m:
         return (today - timedelta(days=int(m.group(1)) * 30)).isoformat()
@@ -112,28 +113,27 @@ def _relative_to_date(text: str) -> str:
 
 
 def _clean_url(href: str) -> str:
-    """Rimuove parametri di tracking dall'URL LinkedIn, tenendo solo il path."""
+    """Remove LinkedIn tracking parameters, keeping only the path."""
     if not href:
         return ""
-    # Tronca al "?" per rimuovere position=, pageNum=, refId=, trackingId=
+    # Drop query parameters such as position=, pageNum=, refId=, and trackingId=.
     return href.split("?")[0]
 
 
 # ---------------------------------------------------------------------------
-# JavaScript estrattore DOM (eseguito nel browser)
+# JavaScript DOM extractor, executed in the browser.
 # ---------------------------------------------------------------------------
 
 _JS_EXTRACT = r"""() => {
     const results = [];
     const seen = new Set();
 
-    // LinkedIn usa sia <li class="base-card ..."> sia <div class="base-card ...">
-    // come wrapper per ogni annuncio nella lista pubblica.
-    // Selezioniamo tutti gli elementi che hanno la classe base-card.
+    // LinkedIn uses both <li class="base-card ..."> and <div class="base-card ...">
+    // as wrappers for public list jobs.
     const cards = document.querySelectorAll('[class*="base-card"]');
 
     for (const card of cards) {
-        // URL: anchor principale del card
+        // URL: main card anchor.
         const anchor = (
             card.querySelector('a.base-card__full-link') ||
             card.querySelector('a[href*="/jobs/view/"]') ||
@@ -142,12 +142,12 @@ _JS_EXTRACT = r"""() => {
         if (!anchor) continue;
 
         const href = anchor.getAttribute('href') || '';
-        // Usa href pulito (senza tracking) come chiave dedup
+        // Use the clean href as the deduplication key.
         const cleanHref = href.split('?')[0];
         if (!cleanHref || seen.has(cleanHref)) continue;
         seen.add(cleanHref);
 
-        // Titolo
+        // Title.
         const titleEl = (
             card.querySelector('h3.base-search-card__title') ||
             card.querySelector('[class*="base-search-card__title"]') ||
@@ -157,24 +157,24 @@ _JS_EXTRACT = r"""() => {
         const title = (titleEl ? titleEl.innerText : '').trim();
         if (!title) continue;
 
-        // Azienda
+        // Company.
         const companyEl = (
             card.querySelector('h4.base-search-card__subtitle a') ||
             card.querySelector('h4.base-search-card__subtitle') ||
             card.querySelector('[class*="base-search-card__subtitle"]') ||
             card.querySelector('h4')
         );
-        // Alcuni nomi azienda includono " | domain.ch" — rimuoviamo il suffisso
+        // Some company names include " | domain.ch"; remove that suffix.
         const company = (companyEl ? companyEl.innerText : '').trim().replace(/\s*\|.*$/, '');
 
-        // Città
+        // City.
         const cityEl = (
             card.querySelector('span.job-search-card__location') ||
             card.querySelector('[class*="job-search-card__location"]')
         );
         const city = (cityEl ? cityEl.innerText : '').trim();
 
-        // Data: attributo datetime (ISO) o testo relativo
+        // Date: datetime attribute (ISO) or relative text.
         const timeEl = card.querySelector('time[datetime]');
         const dateRaw = timeEl
             ? (timeEl.getAttribute('datetime') || timeEl.innerText || '')
@@ -193,15 +193,14 @@ _JS_EXTRACT = r"""() => {
 
 
 # ---------------------------------------------------------------------------
-# Scraper principale
+# Main scraper.
 # ---------------------------------------------------------------------------
 
 @retry()
-def scrape_linkedin_ch(context) -> list:
+def scrape_linkedin_ch(context: BrowserContext) -> list[dict[str, str]]:
     """
-    Se esiste una sessione salvata manualmente (python scraper.py --auth linkedin)
-    la usa in un contesto dedicato; altrimenti modalità pubblica senza login.
-    Mai tentativi di login automatico.
+    Use a manually saved session when available, otherwise scrape public pages.
+    Never attempts automatic login.
     """
     all_jobs  = []
     seen_urls = set()
@@ -213,9 +212,9 @@ def scrape_linkedin_ch(context) -> list:
                 storage_state=str(auth_state_path("linkedin")),
                 locale="it-CH", timezone_id="Europe/Zurich",
             )
-            print("  [linkedin.ch] Uso la sessione autenticata salvata")
+            print("  [linkedin.ch] Using saved authenticated session")
         except Exception as e:
-            print(f"  [linkedin.ch] Sessione salvata illeggibile ({e}) — modalità pubblica")
+            print(f"  [linkedin.ch] Saved session unreadable ({e}) - public mode")
             auth_ctx = None
 
     page = new_stealth_page(auth_ctx or context)
@@ -224,10 +223,10 @@ def scrape_linkedin_ch(context) -> list:
             start = page_num * 25
             url = (
                 f"{LIST_URL}?keywords=&location={_SEARCH_LOCATION}"
-                f"&f_TPR=r2592000"   # ultimi 30 giorni
+                f"&f_TPR=r2592000"   # last 30 days
                 f"&start={start}"
             )
-            print(f"  [linkedin.ch] Pagina {page_num + 1} (start={start})…")
+            print(f"  [linkedin.ch] Page {page_num + 1} (start={start})...")
 
             try:
                 page.goto(url, wait_until="networkidle", timeout=45000)
@@ -236,22 +235,22 @@ def scrape_linkedin_ch(context) -> list:
                     page.goto(url, wait_until="domcontentloaded", timeout=30000)
                     page.wait_for_timeout(3000)
                 except Exception as e:
-                    print(f"  [linkedin.ch] Errore navigazione: {e}")
+                    print(f"  [linkedin.ch] Navigation error: {e}")
                     break
 
-            # Controlla authwall / redirect login — non si aggira, si segnala
+            # Report authwalls/login redirects; do not bypass them.
             if _is_blocked(page):
                 shot = debug_artifacts(page, "linkedin_ch_authwall")
                 if auth_ctx:
-                    reason = ("authwall nonostante la sessione salvata — probabilmente "
-                              "scaduta: riesegui python scraper.py --auth linkedin")
+                    reason = ("authwall despite saved session - probably expired: "
+                              "rerun python scraper.py --auth linkedin")
                 else:
-                    reason = "authwall — per l'accesso completo: python scraper.py --auth linkedin"
+                    reason = "authwall - for full access: python scraper.py --auth linkedin"
                 run_report.set_status("linkedin.ch", "requires_manual_login", reason,
                                       final_url=page.url, screenshot=shot)
                 break
 
-            # Chiudi eventuali modali di sign-in (non bloccanti, solo cleanup)
+            # Close non-blocking sign-in modals when present.
             try:
                 dismiss_btn = page.query_selector(
                     'button[aria-label*="Dismiss"], '
@@ -264,7 +263,7 @@ def scrape_linkedin_ch(context) -> list:
             except Exception:
                 pass
 
-            # Attendi che i card siano presenti nel DOM
+            # Wait for cards to be present in the DOM.
             card_loaded = False
             for wait_sel in [
                 '[class*="base-card"]',
@@ -279,14 +278,14 @@ def scrape_linkedin_ch(context) -> list:
                     pass
 
             if not card_loaded:
-                print(f"  [linkedin.ch] Nessun card trovato (title={page.title()[:60]!r}) — stop")
+                print(f"  [linkedin.ch] No card found (title={page.title()[:60]!r}) - stop")
                 if page_num == 0:
                     shot = debug_artifacts(page, "linkedin_ch_nocards")
-                    hint = (" — NB: con sessione autenticata il DOM è diverso da"
-                            " quello pubblico; selettori da adattare") if auth_ctx else ""
+                    hint = (" - note: authenticated DOM differs from the public DOM;"
+                            " selectors need adjustment") if auth_ctx else ""
                     run_report.set_status(
                         "linkedin.ch", "selector_broken",
-                        f"nessun card a pagina 1 (title={page.title()[:50]!r}){hint}",
+                        f"no card on page 1 (title={page.title()[:50]!r}){hint}",
                         final_url=page.url, screenshot=shot)
                 break
 
@@ -295,7 +294,7 @@ def scrape_linkedin_ch(context) -> list:
 
             raw = page.evaluate(_JS_EXTRACT)
             if not raw:
-                print(f"  [linkedin.ch] Pagina vuota — stop")
+                print(f"  [linkedin.ch] Empty page - stop")
                 if page_num == 0:
                     debug_artifacts(page, "linkedin_ch_empty")
                 break
@@ -311,7 +310,7 @@ def scrape_linkedin_ch(context) -> list:
                 if not title:
                     continue
 
-                # URL assoluto
+                # Absolute URL.
                 if job_url.startswith("/"):
                     job_url = BASE_URL + job_url
                 elif not job_url.startswith("http"):
@@ -328,14 +327,14 @@ def scrape_linkedin_ch(context) -> list:
                 })
 
             if not new_jobs:
-                print(f"  [linkedin.ch] Nessun nuovo annuncio — stop")
+                print(f"  [linkedin.ch] No new jobs - stop")
                 break
 
             all_jobs.extend(new_jobs)
-            print(f"  [linkedin.ch] {len(new_jobs)} nuovi (tot. {len(all_jobs)})")
+            print(f"  [linkedin.ch] {len(new_jobs)} new (total {len(all_jobs)})")
             human_delay(2.5, 5.0)
 
-        print(f"  [linkedin.ch] {len(all_jobs)} annunci trovati")
+        print(f"  [linkedin.ch] {len(all_jobs)} jobs found")
         return all_jobs
     finally:
         try:

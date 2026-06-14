@@ -1,66 +1,108 @@
-"""Test di fumo del generatore dashboard."""
+"""Smoke tests for the dashboard generator."""
 
+import importlib
 import sys
 from pathlib import Path
+from types import ModuleType
+
+from pytest import MonkeyPatch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from dashboard_builder import generate_html, build_card
+
+def load_dashboard_module(monkeypatch: MonkeyPatch) -> ModuleType:
+    config = ModuleType("user_config")
+    config.HOME_LAT = 45.8320
+    config.HOME_LNG = 9.0310
+    config.HOME_CITY = "Test Home"
+    monkeypatch.setitem(sys.modules, "user_config", config)
+
+    for module_name in ("distance_calculator", "dashboard_builder"):
+        if module_name in sys.modules:
+            importlib.reload(sys.modules[module_name])
+
+    return importlib.import_module("dashboard_builder")
 
 
-def _job(**extra) -> dict:
+def _job(**extra: object) -> dict:
     base = {
-        "title": "Operaio di produzione",
+        "title": "Production worker",
         "company": "Rossi SA",
         "city": "Chiasso",
         "date": "2026-06-10",
         "url": "https://www.jobs.ch/it/annuncio/123",
-        "category": "produzione",
+        "category": "production",
         "source": "jobs.ch",
     }
     base.update(extra)
     return base
 
 
-def test_card_mostra_distanza_da_barlassina():
-    card = build_card(_job())
-    assert "Da Barlassina" in card
-    assert "21 km" in card           # Chiasso ≈ 21.3 → mostrato come "21 km"
-    assert 'data-km="21.3"' in card  # attributo per l'ordinamento "più vicini"
+def test_card_shows_configured_home_distance(monkeypatch: MonkeyPatch) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+
+    card = dashboard.build_card(_job())
+
+    assert "From Test Home" in card
+    assert "0 km" in card
+    assert 'data-km="0.0"' in card
 
 
-def test_card_comune_ignoto_mostra_trattino():
-    card = build_card(_job(city="Lugano"))
-    assert 'data-km="9999"' in card  # in fondo quando si ordina per distanza
-    assert "—" in card
+def test_card_unknown_city_sorts_last(monkeypatch: MonkeyPatch) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+
+    card = dashboard.build_card(_job(city="Lugano"))
+
+    assert 'data-km="9999"' in card
+    assert "<span class=\"meta-v\">-</span>" in card
 
 
-def test_card_escapa_html_nei_campi():
-    card = build_card(_job(title='<script>alert("x")</script>'))
+def test_card_escapes_html_fields(monkeypatch: MonkeyPatch) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+
+    card = dashboard.build_card(_job(title='<script>alert("x")</script>'))
+
     assert "<script>alert" not in card
     assert "&lt;script&gt;" in card
 
 
-def test_card_url_non_http_diventa_cancelletto():
-    card = build_card(_job(url="javascript:alert(1)"))
+def test_card_rejects_non_http_url(monkeypatch: MonkeyPatch) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+
+    card = dashboard.build_card(_job(url="javascript:alert(1)"))
+
     assert 'href="#"' in card
     assert "javascript:alert" not in card
 
 
-def test_generate_html_scrive_pagina_completa(tmp_path):
-    out = tmp_path / "index.html"
-    generate_html([_job(), _job(city="Mendrisio", title="Magazziniere",
-                               category="logistica")], str(out))
-    pagina = out.read_text(encoding="utf-8")
-    assert pagina.startswith("<!DOCTYPE html>")
-    assert "__CARDS__" not in pagina          # nessun segnaposto dimenticato
-    assert "__COUNT__" not in pagina
-    assert pagina.count("<article") == 2
-    assert "Più vicini" in pagina             # ordinamento per distanza presente
+def test_generate_html_writes_complete_page(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+    output_path = tmp_path / "index.html"
+
+    dashboard.generate_html(
+        [_job(), _job(city="Mendrisio", title="Warehouse worker", category="logistics")],
+        output_path,
+    )
+    page = output_path.read_text(encoding="utf-8")
+
+    assert page.startswith("<!DOCTYPE html>")
+    assert "__CARDS__" not in page
+    assert "__COUNT__" not in page
+    assert page.count("<article") == 2
+    assert "Nearest" in page
 
 
-def test_generate_html_zero_annunci_mostra_stato_vuoto(tmp_path):
-    out = tmp_path / "vuota.html"
-    generate_html([], str(out))
-    pagina = out.read_text(encoding="utf-8")
-    assert 'class="empty show"' in pagina
+def test_generate_html_with_no_jobs_shows_empty_state(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+    output_path = tmp_path / "empty.html"
+
+    dashboard.generate_html([], output_path)
+    page = output_path.read_text(encoding="utf-8")
+
+    assert 'class="empty show"' in page

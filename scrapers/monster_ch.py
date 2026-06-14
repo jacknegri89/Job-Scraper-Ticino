@@ -1,15 +1,15 @@
 """
-Monster Svizzera — DISABILITATO.
+Monster Switzerland - DISABLED.
 
-www.monster.ch reindirizza a monster.com/de (portale tedesco globale).
-Il dominio svizzero non esiste più come portale indipendente: nessun annuncio
-recuperabile. La funzione restituisce lista vuota senza aprire il browser.
+www.monster.ch redirects to monster.com/de, the global German portal.
+The Swiss domain is no longer an independent portal, so no jobs are
+recoverable. This function returns an empty list without opening the browser.
 """
 
 
-def scrape_monster_ch(context) -> list:  # noqa: ARG001
+def scrape_monster_ch(context: object) -> list[dict[str, str]]:  # noqa: ARG001
     from scrapers.site_report import run_report
-    print("  [monster.ch] Portale non disponibile (redirect a monster.com/de) — skip")
+    print("  [monster.ch] Portal unavailable (redirects to monster.com/de) - skip")
     run_report.set_status("monster.ch", "disabled",
-                          "monster.ch reindirizza a monster.com/de — nessun portale CH")
+                          "monster.ch redirects to monster.com/de - no CH portal")
     return []

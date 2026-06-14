@@ -1,8 +1,8 @@
-# Configurazione centralizzata degli scraper.
-# Tutti i valori sono sovrascrivibili da variabile d'ambiente:
-#   SCRAPER_HEADLESS=1       → browser nascosto
-#   SCRAPER_TIMEOUT_MS=45000 → timeout navigazione in ms
-#   SCRAPER_ATTEMPTS=3       → tentativi per scraper (max 3)
+# Centralized scraper configuration.
+# All values can be overridden by environment variable:
+#   SCRAPER_HEADLESS=1       -> hidden browser
+#   SCRAPER_TIMEOUT_MS=45000 -> navigation timeout in ms
+#   SCRAPER_ATTEMPTS=3       -> scraper attempts (max 3)
 
 import os
 from pathlib import Path
@@ -25,7 +25,7 @@ def _env_int(name: str, default: int) -> int:
 HEADLESS        = _env_bool("SCRAPER_HEADLESS", False)
 PAGE_TIMEOUT_MS = _env_int("SCRAPER_TIMEOUT_MS", 30_000)
 MAX_ATTEMPTS    = max(1, min(_env_int("SCRAPER_ATTEMPTS", 2), 3))
-RETRY_BACKOFF_S = (3, 6)   # secondi di attesa: 3s dopo il 1° fallimento, 6s dopo il 2°
+RETRY_BACKOFF_S = (3, 6)   # Waits: 3s after first failure, 6s after second.
 
 DEBUG_DIR   = Path(__file__).parent.parent / "debug"
 AUTH_DIR    = Path(__file__).parent.parent / "profile"

@@ -1,13 +1,16 @@
+import urllib.parse
+
+from playwright.sync_api import BrowserContext, Page
+
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, retry
 from job_filter import SEARCH_TERMS, categorize_job
-import urllib.parse
 
 BASE_URL   = "https://www.jobs.ch"
 SEARCH_URL = "https://www.jobs.ch/en/vacancies/?term={term}&location=ticino&page={page}"
-MAX_PAGES  = 20   # limite di sicurezza; si ferma prima quando la pagina è vuota
+MAX_PAGES  = 20   # Safety limit; stops earlier when the page is empty.
 
 
-def _extract_jobs_from_page(page) -> list:
+def _extract_jobs_from_page(page: Page) -> list[dict[str, str]]:
     jobs = []
     cards = page.query_selector_all('a[data-cy="job-link"]')
     for card in cards:
@@ -34,21 +37,24 @@ def _extract_jobs_from_page(page) -> list:
                     "source":   "jobs.ch",
                 })
         except Exception as e:
-            print(f"[WARN] Errore card jobs.ch: {e}")
+            print(f"[WARN] jobs.ch card error: {e}")
     return jobs
 
 
 @retry()
-def scrape_jobs_ch(context, search_terms: list = None) -> list:
+def scrape_jobs_ch(
+    context: BrowserContext,
+    search_terms: list[str] | None = None,
+) -> list[dict[str, str]]:
     if search_terms is None:
         search_terms = SEARCH_TERMS
 
     all_jobs  = []
-    seen_urls = set()   # URL già raccolti (globale tra tutti i termini)
+    seen_urls = set()   # URLs already collected across all search terms.
     page = new_stealth_page(context)
     try:
         for term in search_terms:
-            print(f"[jobs.ch] Cerco: '{term}'")
+            print(f"[jobs.ch] Searching: '{term}'")
             for page_num in range(1, MAX_PAGES + 1):
                 url = SEARCH_URL.format(term=urllib.parse.quote_plus(term), page=page_num)
                 try:
@@ -60,7 +66,7 @@ def scrape_jobs_ch(context, search_terms: list = None) -> list:
 
                     jobs = _extract_jobs_from_page(page)
                     if not jobs:
-                        break   # pagina genuinamente vuota
+                        break   # Genuinely empty page.
 
                     new_jobs = [j for j in jobs if j["url"] not in seen_urls]
                     if not new_jobs:
@@ -68,13 +74,13 @@ def scrape_jobs_ch(context, search_terms: list = None) -> list:
                     for j in new_jobs:
                         seen_urls.add(j["url"])
                     all_jobs.extend(new_jobs)
-                    print(f"  pag.{page_num}: {len(new_jobs)} nuovi ({len(jobs)} totali)")
+                    print(f"  page {page_num}: {len(new_jobs)} new ({len(jobs)} total)")
 
                 except Exception as e:
                     print(f"[WARN] {url}: {e}")
                     break
 
-        print(f"[jobs.ch] Totale grezzo: {len(all_jobs)}")
+        print(f"[jobs.ch] Raw total: {len(all_jobs)}")
         return all_jobs
     finally:
         page.close()

@@ -1,14 +1,16 @@
 """
-Scraper per Adecco Svizzera (www.adecco.com/it-ch) — offerte in Ticino.
+Scraper for Adecco Switzerland (www.adecco.com/it-ch), focused on Ticino jobs.
 
-www.adecco.ch reindirizza a adecco.com/de-ch; la versione italiana è adecco.com/it-ch.
-I job vengono caricati da React: i dati si leggono dal React fiber (jobSearchResults[]).
+www.adecco.ch redirects to adecco.com/de-ch; the Italian version is adecco.com/it-ch.
+Jobs are loaded by React, so data is read from the React fiber (jobSearchResults[]).
 URL: https://www.adecco.com/it-ch/trovare-lavoro?jobsearch-title=&location=Ticino
 """
 
 import re
 import unicodedata
 from datetime import date
+
+from playwright.sync_api import BrowserContext
 
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, retry
 from scrapers.site_report import run_report, debug_artifacts
@@ -21,7 +23,7 @@ _PAGE_SIZE = 20
 
 
 def _slugify(text: str) -> str:
-    """Converte testo in slug URL (stile adecco.com)."""
+    """Convert text to an adecco.com-style URL slug."""
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
     text = text.lower()
     text = re.sub(r"[^a-z0-9\s-]", "", text)
@@ -29,7 +31,7 @@ def _slugify(text: str) -> str:
     return text
 
 
-# Estrae jobSearchResults dal React fiber del primo article card
+# React stores the full job payload in the first result card's fiber props.
 _JS_EXTRACT = r"""() => {
     function getReactProps(el) {
         const key = Object.keys(el).find(k => k.startsWith('__reactFiber'));
@@ -56,7 +58,7 @@ _JS_EXTRACT = r"""() => {
 
 
 @retry()
-def scrape_adecco_ch(context) -> list:
+def scrape_adecco_ch(context: BrowserContext) -> list[dict[str, str]]:
     all_jobs = []
     seen_ids = set()
 
@@ -69,7 +71,7 @@ def scrape_adecco_ch(context) -> list:
                 if page_num > 0
                 else f"{LIST_URL}?jobsearch-title=&location=Ticino"
             )
-            print(f"  [adecco.ch] Pagina {page_num + 1}…")
+            print(f"  [adecco.ch] Page {page_num + 1}...")
 
             try:
                 page.goto(page_url, wait_until="networkidle", timeout=45000)
@@ -84,12 +86,12 @@ def scrape_adecco_ch(context) -> list:
             try:
                 page.wait_for_selector("article.JobSearch_job-search-card__XtCBC", timeout=10000)
             except Exception:
-                print(f"  [adecco.ch] Nessun card trovato — stop")
+                print(f"  [adecco.ch] No card found - stop")
                 if page_num == 0:
                     shot = debug_artifacts(page, "adecco_ch_nocards")
                     run_report.set_status(
                         "adecco.ch", "selector_broken",
-                        "card React non trovato a pagina 1 (classe cambiata?)",
+                        "React card not found on page 1 (class changed?)",
                         final_url=page.url, screenshot=shot)
                 break
 
@@ -98,12 +100,12 @@ def scrape_adecco_ch(context) -> list:
 
             raw = page.evaluate(_JS_EXTRACT)
             if not raw:
-                print(f"  [adecco.ch] Nessun dato React fiber — stop")
+                print(f"  [adecco.ch] No React fiber data - stop")
                 if page_num == 0:
                     shot = debug_artifacts(page, "adecco_ch_nofiber")
                     run_report.set_status(
                         "adecco.ch", "selector_broken",
-                        "React fiber jobSearchResults non trovato",
+                        "React fiber jobSearchResults not found",
                         final_url=page.url, screenshot=shot)
                 break
 
@@ -140,15 +142,15 @@ def scrape_adecco_ch(context) -> list:
                 break
 
             all_jobs.extend(batch)
-            print(f"  [adecco.ch] {len(batch)} nuovi (tot. {len(all_jobs)})")
+            print(f"  [adecco.ch] {len(batch)} new (total {len(all_jobs)})")
 
-            # Se meno di _PAGE_SIZE risultati, siamo sull'ultima pagina
+            # Fewer than _PAGE_SIZE results means this is the last page.
             if len(raw) < _PAGE_SIZE:
                 break
 
             human_delay(2.0, 4.0)
 
-        print(f"  [adecco.ch] {len(all_jobs)} annunci trovati")
+        print(f"  [adecco.ch] {len(all_jobs)} jobs found")
         return all_jobs
     finally:
         page.close()

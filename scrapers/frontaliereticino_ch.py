@@ -1,11 +1,11 @@
 """
-Scraper per frontaliereticino.ch — offerte lavoro in Ticino.
+Scraper for frontaliereticino.ch, focused on Ticino jobs.
 
-Il sito espone un indice JSON statico su CDN (aggiornato quotidianamente):
+The site exposes a static JSON index on its CDN, updated daily:
 https://cdn.frontaliereticino.ch/data/jobs-it-index.json
 
-8 000+ annunci totali Svizzera, ~680 Ticino (canton == "TI").
-Nessun Playwright necessario — semplice GET HTTP.
+8,000+ Swiss jobs total, about 680 in Ticino (canton == "TI").
+No Playwright needed: a simple HTTP GET is enough.
 """
 
 import json
@@ -34,18 +34,18 @@ def _parse_date(raw: str) -> str:
     return date.today().isoformat()
 
 
-def scrape_frontaliereticino_ch(context) -> list:  # context unused — puro HTTP
-    print("  [frontaliereticino.ch] Scarico indice JSON CDN…")
+def scrape_frontaliereticino_ch(context: object) -> list[dict[str, str]]:  # context unused: pure HTTP.
+    print("  [frontaliereticino.ch] Downloading CDN JSON index...")
     try:
         req = urllib.request.Request(_INDEX_URL, headers=_HEADERS)
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except Exception as e:
-        print(f"  [frontaliereticino.ch] Errore download: {e}")
+        print(f"  [frontaliereticino.ch] Download error: {e}")
         return []
 
     ticino = [j for j in data if j.get("canton") == "TI"]
-    print(f"  [frontaliereticino.ch] {len(ticino)} annunci Ticino su {len(data)} totali")
+    print(f"  [frontaliereticino.ch] {len(ticino)} Ticino jobs out of {len(data)} total")
 
     jobs = []
     for item in ticino:
@@ -55,7 +55,7 @@ def scrape_frontaliereticino_ch(context) -> list:  # context unused — puro HTT
             continue
 
         city = (item.get("addressLocality") or item.get("location") or "").strip()
-        # Preferisci URL diretto del datore per fetch_description; cade su ft.ch
+        # Prefer employer URLs for fetch_description, falling back to ft.ch.
         employer_url = (item.get("url") or "").strip()
         url = employer_url if employer_url.startswith("http") else f"{_JOB_BASE}{slug}/"
         jobs.append({
@@ -68,5 +68,5 @@ def scrape_frontaliereticino_ch(context) -> list:  # context unused — puro HTT
             "source":   "frontaliereticino.ch",
         })
 
-    print(f"  [frontaliereticino.ch] {len(jobs)} annunci processati")
+    print(f"  [frontaliereticino.ch] {len(jobs)} jobs processed")
     return jobs

@@ -1,14 +1,17 @@
 """
-Scraper per Orienta Svizzera (www.orienta.ch)
+Scraper for Orienta Switzerland (www.orienta.ch)
 
-URL lista: /it/orienta-job/offerte-di-lavoro.html?page=N
-49 annunci su ~5 pagine, tutti in Ticino (filiale Lugano/Manno).
-Struttura: article > a[href*='/offerta-di-lavoro/'] > h2
-           righe "Data" / "Sede" come coppie di righe nel testo.
-           Formato Sede live: "Svizzera, Ticino, Città" → si prende l'ultima parte.
+List URL: /it/orienta-job/offerte-di-lavoro.html?page=N
+49 jobs across about 5 pages, all in Ticino (Lugano/Manno branch).
+Structure: article > a[href*='/offerta-di-lavoro/'] > h2
+           "Data" / "Sede" rows appear as label/value pairs in the text.
+           Live "Sede" format: "Svizzera, Ticino, City"; keep the last part.
 """
 
 from datetime import datetime
+
+from playwright.sync_api import BrowserContext, Page
+
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, retry
 from job_filter import categorize_job
 
@@ -18,14 +21,14 @@ MAX_PAGES = 10
 
 
 def _parse_date(raw: str) -> str:
-    """'09/06/2026 Nuovo' → '2026-06-09'"""
+    """Convert strings like '09/06/2026 Nuovo' to '2026-06-09'."""
     try:
         return datetime.strptime(raw.split()[0], "%d/%m/%Y").strftime("%Y-%m-%d")
     except (ValueError, IndexError):
         return raw
 
 
-def _extract_jobs(page) -> list:
+def _extract_jobs(page: Page) -> list[dict[str, str]]:
     jobs = []
     for article in page.query_selector_all("article"):
         link_el = article.query_selector("a[href*='/offerta-di-lavoro/']")
@@ -38,13 +41,13 @@ def _extract_jobs(page) -> list:
         if not title:
             continue
 
-        # Le etichette "Data" e "Sede" appaiono come righe separate, seguite dal valore
+        # Site labels "Data" and "Sede" appear as separate rows before values.
         lines = [l.strip() for l in article.inner_text().splitlines() if l.strip()]
         city = date = ""
         for i, line in enumerate(lines):
             if line == "Sede" and i + 1 < len(lines):
                 parts = lines[i + 1].split(",")
-                # Formato live: "Svizzera, Ticino, Chiasso" → la città è l'ultima parte
+                # Live value format is "Svizzera, Ticino, Chiasso"; city is last.
                 city = parts[-1].strip()
             elif line == "Data" and i + 1 < len(lines):
                 date = _parse_date(lines[i + 1])
@@ -62,14 +65,14 @@ def _extract_jobs(page) -> list:
 
 
 @retry()
-def scrape_orienta_ch(context) -> list:
+def scrape_orienta_ch(context: BrowserContext) -> list[dict[str, str]]:
     all_jobs  = []
     seen_urls = set()
     page = new_stealth_page(context)
     try:
         for page_num in range(1, MAX_PAGES + 1):
             url = f"{LIST_URL}?page={page_num}"
-            print(f"  [orienta.ch] Pagina {page_num}…")
+            print(f"  [orienta.ch] Page {page_num}...")
             page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
             if page_num == 1:
@@ -84,11 +87,11 @@ def scrape_orienta_ch(context) -> list:
                 break
             new_jobs = [j for j in jobs if j["url"] not in seen_urls]
             if not new_jobs:
-                break   # pagina ripetuta → fine paginazione reale
+                break   # Repeated page: real pagination ended.
             for j in new_jobs:
                 seen_urls.add(j["url"])
             all_jobs.extend(new_jobs)
-            print(f"  [orienta.ch] {len(new_jobs)} nuovi (tot. {len(all_jobs)})")
+            print(f"  [orienta.ch] {len(new_jobs)} new (total {len(all_jobs)})")
             human_delay(2.0, 4.0)
 
         return all_jobs

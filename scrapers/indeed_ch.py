@@ -1,18 +1,20 @@
-# Scraper per Indeed Svizzera (ch.indeed.com) — annunci in Ticino.
+# Scraper for Indeed Switzerland (ch.indeed.com), focused on Ticino jobs.
 #
-# Strategia: ricerche per keyword in modalità pubblica (nessuna sessione).
-# Indeed mostra pagina 1 senza login; dalla pagina 2 richiede registrazione.
-# Con N keyword diverse si ottengono N×15 annunci, deduplicati per job-key (jk).
+# Strategy: keyword searches in public mode, without a session.
+# Indeed shows page 1 without login; page 2 requires registration.
+# Different keywords produce N x 15 jobs, deduplicated by job key (jk).
 #
 # URL: https://ch.indeed.com/jobs?q=<keyword>&l=Ticino&radius=50
-# Struttura DOM confermata (2026-06):
-#   a[data-jk]                   → link annuncio
-#   span[id^="jobTitle"]         → titolo
-#   [data-testid="company-name"] → azienda
-#   [data-testid="text-location"]→ città
+# Confirmed DOM structure (2026-06):
+#   a[data-jk]                   -> job link
+#   span[id^="jobTitle"]         -> title
+#   [data-testid="company-name"] -> company
+#   [data-testid="text-location"]-> city
 
 import re
 from datetime import date, timedelta
+
+from playwright.sync_api import BrowserContext, Page
 
 from scrapers import new_stealth_page, human_delay, human_scroll, retry
 from scrapers.page_guard import detect_auth_gate, detect_block, dismiss_cookies
@@ -22,7 +24,7 @@ from job_filter import categorize_job
 BASE_URL = "https://ch.indeed.com"
 LIST_URL = "https://ch.indeed.com/jobs"
 
-# Ogni keyword genera una ricerca sulla pagina 1 (~15 risultati).
+# Each keyword runs one page-1 search, usually about 15 results.
 _KEYWORDS = [
     "", "operaio", "magazziniere", "tecnico", "addetto",
     "autista", "elettricista", "assemblatore", "logistica",
@@ -31,7 +33,7 @@ _KEYWORDS = [
 
 
 def _relative_to_date(text: str) -> str:
-    # Converte date relative ("2 giorni fa", "ieri", "30+ days ago") in YYYY-MM-DD.
+    # Convert relative date text, including Italian site strings, to YYYY-MM-DD.
     today = date.today()
     t = text.lower().strip()
     if not t or "oggi" in t or "just posted" in t or "appena" in t or "now" in t:
@@ -51,7 +53,7 @@ def _relative_to_date(text: str) -> str:
     return today.isoformat()
 
 
-# Estrae i job dalla pagina tramite JavaScript (più affidabile dei CSS selector).
+# Extract jobs through JavaScript; this is more reliable than chained CSS selectors.
 _JS_EXTRACT = r"""() => {
     const results = [];
     const seen = new Set();
@@ -90,11 +92,16 @@ _JS_EXTRACT = r"""() => {
 }"""
 
 
-def _scrape_keyword(page, keyword: str, seen_jk: set, cookie_done: list) -> list:
+def _scrape_keyword(
+    page: Page,
+    keyword: str,
+    seen_jk: set[str],
+    cookie_done: list[bool],
+) -> list[dict[str, str]]:
     q = keyword.replace(" ", "+")
     url = f"{LIST_URL}?q={q}&l=Ticino&radius=50"
-    label = repr(keyword) if keyword else "'(tutte)'"
-    print(f"  [indeed.ch] Cerco: {label}")
+    label = repr(keyword) if keyword else "'(all)'"
+    print(f"  [indeed.ch] Searching: {label}")
 
     try:
         page.goto(url, wait_until="networkidle", timeout=40000)
@@ -103,22 +110,22 @@ def _scrape_keyword(page, keyword: str, seen_jk: set, cookie_done: list) -> list
             page.goto(url, wait_until="domcontentloaded", timeout=25000)
             page.wait_for_timeout(2000)
         except Exception as e:
-            print(f"  [indeed.ch] Navigazione fallita ({type(e).__name__}) — skip")
+            print(f"  [indeed.ch] Navigation failed ({type(e).__name__}) - skip")
             return []
 
-    # Cookie banner: chiuso solo alla prima pagina della sessione.
+    # Close the cookie banner only once per session.
     if not cookie_done[0]:
         dismiss_cookies(page, "indeed.ch")
         page.wait_for_timeout(1500)
         cookie_done[0] = True
 
     if detect_block(page):
-        print("  [indeed.ch] Blocco anti-bot rilevato — stop")
+        print("  [indeed.ch] Anti-bot block detected - stop")
         return []
     if detect_auth_gate(page):
         return []
 
-    # Attendi che le card siano nel DOM.
+    # Wait for cards to be present in the DOM.
     for sel in ["[data-jk]", "#mosaic-provider-jobcards", ".job_seen_beacon"]:
         try:
             page.wait_for_selector(sel, timeout=5000)
@@ -155,10 +162,10 @@ def _scrape_keyword(page, keyword: str, seen_jk: set, cookie_done: list) -> list
 
 
 @retry()
-def scrape_indeed_ch(context) -> list:
+def scrape_indeed_ch(context: BrowserContext) -> list[dict[str, str]]:
     all_jobs    = []
     seen_jk     = set()
-    cookie_done = [False]   # lista per permettere la modifica dalla funzione interna
+    cookie_done = [False]   # Mutable flag shared with the keyword helper.
 
     page = new_stealth_page(context)
     try:
@@ -166,10 +173,10 @@ def scrape_indeed_ch(context) -> list:
             batch = _scrape_keyword(page, kw, seen_jk, cookie_done)
             if batch:
                 all_jobs.extend(batch)
-                print(f"  [indeed.ch]   +{len(batch)} nuovi (tot. {len(all_jobs)})")
+                print(f"  [indeed.ch]   +{len(batch)} new (total {len(all_jobs)})")
             human_delay(1.5, 3.0)
 
-        print(f"  [indeed.ch] {len(all_jobs)} annunci trovati")
+        print(f"  [indeed.ch] {len(all_jobs)} jobs found")
         return all_jobs
     finally:
         try:

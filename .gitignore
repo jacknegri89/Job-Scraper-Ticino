@@ -217,11 +217,17 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Output generati dallo scraper
+# Generated scraper output
 index.html
 jobs_cache.json
 scan_report.json
 debug/
 
-# Sessioni auth browser (contengono cookie — non condividere)
+# Browser auth sessions contain cookies and must stay local
 profile/
+
+# Personal settings: home coordinates and AI profile
+user_config.py
+
+# Local planning artifacts for agents; not needed to run the scraper
+.planning/

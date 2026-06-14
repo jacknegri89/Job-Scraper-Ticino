@@ -1,38 +1,42 @@
 """
-Generatore della dashboard index.html.
+Generate the interactive ``index.html`` job dashboard.
 
-Design: tema scuro semplice e leggibile, una colonna di controlli
-(ricerca, filtri categoria, filtro AI, ordinamento) e una griglia di card.
-Ogni card mostra anche la distanza in km da Barlassina (linea d'aria).
+Design: a readable dark theme with search, category chips, an AI match filter,
+sorting, and a responsive card grid. Each card also shows the distance from the
+home city configured in ``user_config.py``.
 
-Struttura del file:
-  - costanti di presentazione (CATEGORY, SOURCE_LABEL)
-  - pulizia descrizioni grezze (_clean_raw)
-  - helper di card: ogni blocco HTML ha la sua funzione nominata
-  - build_card: assembla i blocchi
-  - generate_html: statistiche + sostituzione segnaposto nel template
+File layout:
+  - presentation constants (CATEGORY, SOURCE_LABEL)
+  - raw description cleanup (_clean_raw)
+  - card helpers, one named function per HTML block
+  - build_card: assemble one job card
+  - generate_html: compute dashboard stats and fill the page template
 """
 
 import html as html_lib
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-from distance_calculator import km_da_barlassina
-from salary_calculator import calcola_netto
+from distance_calculator import HOME_CITY, km_from_home
+from salary_calculator import calculate_net_salary
 
-# category_id: (colore_puntino, etichetta)
-CATEGORY = {
+Job = dict[str, Any]
+CategoryInfo = tuple[str, str]
+
+# category_id: (dot_color, dashboard_label). IDs come from job_filter.py.
+CATEGORY: dict[str, CategoryInfo] = {
     "tech":         ("#79B8FF", "Tech / IT"),
-    "logistica":    ("#7EE2A8", "Logistica"),
-    "produzione":   ("#76E3EA", "Produzione"),
-    "ristorazione": ("#FF9EC1", "Ristorazione"),
-    "pulizie":      ("#FFD47E", "Pulizie"),
+    "logistics":    ("#7EE2A8", "Logistics"),
+    "production":   ("#76E3EA", "Manufacturing"),
+    "food_service": ("#FF9EC1", "Food service"),
+    "cleaning":     ("#FFD47E", "Cleaning"),
     "retail":       ("#FFB07C", "Retail"),
-    "trasporti":    ("#BFA9FF", "Trasporti"),
-    "altro":        ("#9AA0A6", "Altro"),
+    "transport":    ("#BFA9FF", "Transport"),
+    "other":        ("#9AA0A6", "Other"),
 }
 
-SOURCE_LABEL = {
+SOURCE_LABEL: dict[str, str] = {
     "jobs.ch":              "jobs.ch",
     "carriera.ch":          "carriera.ch",
     "gigroup.ch":           "Gi Group",
@@ -43,21 +47,21 @@ SOURCE_LABEL = {
     "monster.ch":           "Monster",
     "adecco.ch":            "Adecco",
     "manpower.ch":          "Manpower",
-    "frontaliereticino.ch": "Frontalieri Ticino",
+    "frontaliereticino.ch": "frontaliereticino.ch",
     "linkedin.ch":          "LinkedIn",
 }
 
 
-def _e(testo) -> str:
-    """Escape HTML."""
-    return html_lib.escape(str(testo))
+def _escape_html(value: object) -> str:
+    """Escape a value before it is inserted into HTML."""
+    return html_lib.escape(str(value))
 
 
-# ────────────────────────────────────────────────────────────────
-# Pulizia del testo grezzo delle descrizioni
-# ────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------
+# Raw description cleanup
+# ----------------------------------------------------------------
 
-# Sottostringhe sicure: presenti SOLO in navigazione/boilerplate dei portali
+# Safe substrings that appear only in portal navigation or boilerplate text.
 _JUNK = frozenset([
     "home / offerte di lavoro", "candidati ora", "inserisci la tua email",
     "dettagli offerta di lavoro", "dettagli dell'annuncio",
@@ -68,199 +72,203 @@ _JUNK = frozenset([
     "classe e stipendio annuo", "sede di lavoro:", "tipo di lavoro:",
 ])
 
-# Termini ambigui: scartano il segmento solo se appare ALL'INIZIO
+# Ambiguous terms remove a segment only when they appear at the start.
 _JUNK_PREFIX = (
     "registrati", "login", "opportunit", "inserisci la tua",
     "dettagli dell", "offerta:", "soggetto:",
 )
 
-# Prefissi-etichetta da togliere dall'inizio di ogni segmento
+# Label prefixes removed from the start of a description segment.
 _LABEL_PREFIX = ("descrizione:", "dettagli:", "offerta di lavoro:", "soggetto:")
 
 
-def _strip_label_prefix(segmento: str) -> str:
-    """'Descrizione: testo…' → 'testo…'"""
-    minuscolo = segmento.lower()
-    for etichetta in _LABEL_PREFIX:
-        if minuscolo.startswith(etichetta):
-            return segmento[len(etichetta):].strip()
-    return segmento
+def _strip_label_prefix(segment: str) -> str:
+    """Remove a known scraped label prefix from a segment."""
+    lowered = segment.lower()
+    for label in _LABEL_PREFIX:
+        if lowered.startswith(label):
+            return segment[len(label):].strip()
+    return segment
 
 
-def _is_junk(segmento: str) -> bool:
-    minuscolo = segmento.lower()
-    if len(segmento) < 20:
+def _is_junk(segment: str) -> bool:
+    lowered = segment.lower()
+    if len(segment) < 20:
         return True
-    if any(j in minuscolo for j in _JUNK):
+    if any(junk in lowered for junk in _JUNK):
         return True
-    return minuscolo.startswith(_JUNK_PREFIX)
+    return lowered.startswith(_JUNK_PREFIX)
 
 
-def _clean_raw(testo: str) -> str:
-    """Filtra il testo grezzo: rimuove breadcrumb, pulsanti, metadati form."""
-    segmenti = [s.strip() for s in testo.split(" | ") if s.strip()]
-    buoni = []
-    for segmento in segmenti:
-        segmento = _strip_label_prefix(segmento)
-        if not _is_junk(segmento):
-            buoni.append(segmento)
-    return " ".join(buoni)
+def _clean_raw(text: str) -> str:
+    """Remove breadcrumbs, buttons, and form metadata from scraped text."""
+    segments = [part.strip() for part in text.split(" | ") if part.strip()]
+    useful_segments: list[str] = []
+    for segment in segments:
+        segment = _strip_label_prefix(segment)
+        if not _is_junk(segment):
+            useful_segments.append(segment)
+    return " ".join(useful_segments)
 
 
-# ────────────────────────────────────────────────────────────────
-# Blocchi della card — una funzione per blocco
-# ────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------
+# Card blocks, one function per block
+# ----------------------------------------------------------------
 
-def _desc_html(job: dict) -> str:
-    """Descrizione: preferisce quella dell'AI, altrimenti testo grezzo pulito."""
-    llm_desc = job.get("llm_descrizione", "").strip()
-    if llm_desc:
-        return _e(llm_desc).replace("\n", "<br>")
+def _description_html(job: Job) -> str:
+    """Prefer the AI description, then fall back to cleaned raw text."""
+    llm_description = str(job.get("llm_descrizione") or "").strip()
+    if llm_description:
+        return _escape_html(llm_description).replace("\n", "<br>")
 
-    raw = job.get("description", "").strip()
-    if not raw:
+    raw_description = str(job.get("description") or "").strip()
+    if not raw_description:
         return ""
-    pulito = _clean_raw(raw)
-    if not pulito:
+    cleaned = _clean_raw(raw_description)
+    if not cleaned:
         return ""
-    troncato = pulito[:700] + ("…" if len(pulito) > 700 else "")
-    return _e(troncato)
+    truncated = cleaned[:700] + ("…" if len(cleaned) > 700 else "")
+    return _escape_html(truncated)
 
 
-def _desc_block(job: dict) -> str:
-    corpo = _desc_html(job)
-    if not corpo:
+def _description_block(job: Job) -> str:
+    body = _description_html(job)
+    if not body:
         return ""
-    return f'<p class="card-desc">{corpo}</p>'
+    return f'<p class="card-desc">{body}</p>'
 
 
-def _ai_block(job: dict) -> tuple[str, str]:
+def _ai_block(job: Job) -> tuple[str, str]:
     """
-    Ritorna (valore data-ai, blocco HTML del verdetto AI).
-    data-ai: "adatto" | "non_adatto" | "none" — usato dal filtro in pagina.
-    """
-    adatto = job.get("llm_adatto")
-    motivo = _e(job.get("llm_motivo", ""))
-    motivo_html = f'<p class="ai-why">{motivo}</p>' if motivo else ""
+    Return the data-ai value and the AI verdict HTML block.
 
-    if adatto is True:
-        return "adatto", (
+    data-ai is ``"match"``, ``"not_match"``, or ``"none"`` and is used by the
+    in-page filter.
+    """
+    is_match = job.get("llm_adatto")
+    reason = _escape_html(job.get("llm_motivo", ""))
+    reason_html = f'<p class="ai-why">{reason}</p>' if reason else ""
+
+    if is_match is True:
+        return "match", (
             '<div class="ai ai-ok"><span class="ai-ico">✔</span><div>'
-            '<span class="ai-tag">Adatto a te</span>' + motivo_html + "</div></div>"
+            '<span class="ai-tag">Good match</span>' + reason_html + "</div></div>"
         )
-    if adatto is False:
-        return "non_adatto", (
+    if is_match is False:
+        return "not_match", (
             '<div class="ai ai-no"><span class="ai-ico">✕</span><div>'
-            '<span class="ai-tag">Non adatto</span>' + motivo_html + "</div></div>"
+            '<span class="ai-tag">Not a match</span>' + reason_html + "</div></div>"
         )
     return "none", ""
 
 
-def _salary_block(job: dict) -> str:
-    """Pannello stipendio: lordo CH → trattenute → netto stimato in Italia."""
-    lordo = job.get("llm_stipendio_lordo")
-    if not lordo:
+def _salary_block(job: Job) -> str:
+    """Build the salary panel: Swiss gross pay to estimated Italian net pay."""
+    gross_salary = job.get("llm_stipendio_lordo")
+    if not gross_salary:
         return ""
-    tax = calcola_netto(lordo)
-    if not tax:
+    net_salary = calculate_net_salary(gross_salary)
+    if not net_salary:
         return ""
     return (
         '<div class="salary">'
-        '<div class="sal-head">Stipendio stimato</div>'
-        f'<div class="sal-row"><span>Lordo CH</span>'
-        f'<span class="sal-num">{tax["lordo_chf"]:,} CHF</span></div>'
-        f'<div class="sal-row deduct"><span>Contributi sociali CH</span>'
-        f'<span class="sal-num">−{tax["soc_chf"]:,} CHF</span></div>'
-        f'<div class="sal-row deduct"><span>Imposta alla fonte TI</span>'
-        f'<span class="sal-num">−{tax["qs_chf"]:,} CHF</span></div>'
-        f'<div class="sal-row deduct"><span>IRPEF aggiuntiva IT</span>'
-        f'<span class="sal-num">−{tax["irpef_eur"]:,} €</span></div>'
-        f'<div class="sal-net"><span>Netto in Italia</span>'
-        f'<span>~{tax["netto_eur"]:,} €/mese</span></div>'
-        '<p class="sal-note">Stima ±15% · regime frontaliero post 17/07/2023</p>'
+        '<div class="sal-head">Estimated salary</div>'
+        f'<div class="sal-row"><span>Swiss gross</span>'
+        f'<span class="sal-num">{net_salary["gross_chf"]:,} CHF</span></div>'
+        f'<div class="sal-row deduct"><span>Swiss social contributions</span>'
+        f'<span class="sal-num">−{net_salary["social_chf"]:,} CHF</span></div>'
+        f'<div class="sal-row deduct"><span>Ticino withholding tax</span>'
+        f'<span class="sal-num">−{net_salary["withholding_chf"]:,} CHF</span></div>'
+        f'<div class="sal-row deduct"><span>Additional Italian income tax</span>'
+        f'<span class="sal-num">−{net_salary["extra_italian_tax_eur"]:,} €</span></div>'
+        f'<div class="sal-net"><span>Net in Italy</span>'
+        f'<span>~{net_salary["net_eur"]:,} €/month</span></div>'
+        '<p class="sal-note">Estimate ±15% · cross-border regime after 2023-07-17</p>'
         "</div>"
     )
 
 
-def _email_block(job: dict) -> str:
-    email = job.get("email", "").strip()
+def _email_block(job: Job) -> str:
+    email = str(job.get("email") or "").strip()
     if not email:
         return ""
-    email = _e(email)
-    return f'<a class="email-link" href="mailto:{email}">✉ {email}</a>'
+    escaped_email = _escape_html(email)
+    return f'<a class="email-link" href="mailto:{escaped_email}">✉ {escaped_email}</a>'
 
 
-def _distance_of(job: dict) -> float | None:
-    return km_da_barlassina(job.get("city", ""))
+def _distance_of(job: Job) -> float | None:
+    return km_from_home(str(job.get("city") or ""))
 
 
 def _distance_label(km: float | None) -> str:
     if km is None:
-        return "—"
+        return "-"
     return f"{km:.0f} km"
 
 
-def _safe_url(job: dict) -> str:
-    url = job.get("url", "")
+def _safe_url(job: Job) -> str:
+    url = str(job.get("url") or "")
     if url.startswith(("https://", "http://")):
-        return _e(url)
+        return _escape_html(url)
     return "#"
 
 
-def _search_blob(job: dict) -> str:
-    """Testo minuscolo usato dalla ricerca live."""
-    campi = (job.get("title", ""), job.get("company", ""),
-             job.get("city", ""), job.get("email", ""))
-    return _e(" ".join(campi).lower())
+def _search_blob(job: Job) -> str:
+    """Lowercase text used by the live search box."""
+    fields = (str(job.get("title") or ""), str(job.get("company") or ""),
+              str(job.get("city") or ""), str(job.get("email") or ""))
+    return _escape_html(" ".join(fields).lower())
 
 
-# ────────────────────────────────────────────────────────────────
-# Card completa
-# ────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------
+# Full card
+# ----------------------------------------------------------------
 
-def build_card(job: dict) -> str:
-    categoria = job.get("category", "altro")
-    colore, etichetta_cat = CATEGORY.get(categoria, CATEGORY["altro"])
-    fonte = SOURCE_LABEL.get(job.get("source", ""), _e(job.get("source", "")))
+def build_card(job: Job) -> str:
+    category_id = str(job.get("category") or "other")
+    color, category_label = CATEGORY.get(category_id, CATEGORY["other"])
+    source_id = str(job.get("source") or "")
+    source = SOURCE_LABEL.get(source_id, _escape_html(source_id))
 
     km = _distance_of(job)
-    km_attr = f"{km:.1f}" if km is not None else "9999"   # 9999 = in fondo nell'ordinamento
+    km_attr = f"{km:.1f}" if km is not None else "9999"  # Put unknown distances last.
 
     ai_filter, ai_html = _ai_block(job)
+    home_city_label = _escape_html(HOME_CITY)
 
-    return f"""<article class="card" data-category="{_e(categoria)}" data-ai="{ai_filter}"
-  data-km="{km_attr}" data-search="{_search_blob(job)}" style="--accent:{colore}">
+    return f"""<article class="card" data-category="{_escape_html(category_id)}" data-ai="{ai_filter}"
+  data-km="{km_attr}" data-search="{_search_blob(job)}" style="--accent:{color}">
   <div class="card-head">
-    <span class="card-cat"><span class="cat-dot"></span>{etichetta_cat}</span>
-    <span class="card-source">{fonte}</span>
+    <span class="card-cat"><span class="cat-dot"></span>{category_label}</span>
+    <span class="card-source">{source}</span>
   </div>
-  <h2 class="card-title">{_e(job.get("title", ""))}</h2>
-  <p class="card-company">{_e(job.get("company", "")) or "&nbsp;"}</p>
-  {_desc_block(job)}
+  <h2 class="card-title">{_escape_html(job.get("title", ""))}</h2>
+  <p class="card-company">{_escape_html(job.get("company", "")) or "&nbsp;"}</p>
+  {_description_block(job)}
   {ai_html}
   <div class="card-meta">
-    <div><span class="meta-k">Luogo</span><span class="meta-v">{_e(job.get("city", ""))}</span></div>
-    <div><span class="meta-k">Da Barlassina</span><span class="meta-v">{_distance_label(km)}</span></div>
-    <div><span class="meta-k">Pubblicato</span><span class="meta-v">{_e(job.get("date", "")) or "—"}</span></div>
+    <div><span class="meta-k">Location</span><span class="meta-v">{_escape_html(job.get("city", ""))}</span></div>
+    <div><span class="meta-k">From {home_city_label}</span><span class="meta-v">{_distance_label(km)}</span></div>
+    <div><span class="meta-k">Posted</span><span class="meta-v">{_escape_html(job.get("date", "")) or "-"}</span></div>
   </div>
   {_salary_block(job)}
   {_email_block(job)}
   <a class="apply-btn" href="{_safe_url(job)}" target="_blank" rel="noopener noreferrer">
-    Candidati <span class="arrow">→</span>
+    Apply <span class="arrow">→</span>
   </a>
 </article>"""
 
 
-# ────────────────────────────────────────────────────────────────
-# Template pagina
-# ────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------
+# Page template
+# ----------------------------------------------------------------
 
 _TEMPLATE = """<!DOCTYPE html>
-<html lang="it">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Lavoro Ticino — dashboard frontaliere</title>
+<title>Ticino Jobs — cross-border dashboard</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23161B22%22/><text x=%2232%22 y=%2243%22 font-size=%2230%22 text-anchor=%22middle%22 fill=%22%233FB950%22>●</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -287,7 +295,7 @@ body {
 }
 ::selection { background: var(--green); color: #fff; }
 
-/* ── Header ───────────────────────────────────────── */
+/* Header */
 header {
   max-width: 1280px; margin: 0 auto;
   padding: 40px 24px 28px;
@@ -308,7 +316,7 @@ h1 .dot { color: var(--green); }
 .stat.green b { color: var(--green); }
 .stat span { color: var(--faint); font-size: 12px; font-weight: 500; }
 
-/* ── Toolbar ──────────────────────────────────────── */
+/* Toolbar */
 .toolbar {
   position: sticky; top: 0; z-index: 50;
   background: rgba(14,17,22,.92);
@@ -354,7 +362,7 @@ h1 .dot { color: var(--green); }
 .chip-ai { border-color: rgba(63,185,80,.4); color: var(--green); }
 .chip-ai.active { background: var(--green); color: #fff; border-color: var(--green); }
 
-/* ── Griglia card ─────────────────────────────────── */
+/* Card grid */
 main { max-width: 1280px; margin: 0 auto; padding: 24px 24px 80px; }
 .grid {
   display: grid; gap: 14px;
@@ -367,8 +375,8 @@ main { max-width: 1280px; margin: 0 auto; padding: 24px 24px 80px; }
   transition: border-color .15s, transform .15s;
 }
 .card:hover { border-color: var(--line2); transform: translateY(-2px); }
-.card[data-ai="non_adatto"] { opacity: .45; }
-.card[data-ai="non_adatto"]:hover { opacity: 1; }
+.card[data-ai="not_match"] { opacity: .45; }
+.card[data-ai="not_match"]:hover { opacity: 1; }
 
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .card-cat {
@@ -441,7 +449,7 @@ main { max-width: 1280px; margin: 0 auto; padding: 24px 24px 80px; }
 .apply-btn .arrow { transition: transform .15s; }
 .apply-btn:hover .arrow { transform: translateX(3px); }
 
-/* ── Stato vuoto / footer ─────────────────────────── */
+/* Empty state and footer */
 .empty { display: none; text-align: center; padding: 70px 20px; color: var(--muted); }
 .empty.show { display: block; }
 .empty h3 { font-size: 22px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
@@ -465,32 +473,32 @@ footer {
 
 <header>
   <div class="h-top">
-    <h1><span class="dot">●</span> Lavoro Ticino</h1>
-    <span class="updated">Aggiornato il __NOW__</span>
+    <h1><span class="dot">●</span> Ticino Jobs</h1>
+    <span class="updated">Last updated __NOW__</span>
   </div>
-  <p class="subtitle">Annunci da __NSOURCES__ portali svizzeri, filtrati sul
-     distretto di Mendrisio. Distanze calcolate da Barlassina (linea d'aria).</p>
+  <p class="subtitle">Jobs from __NSOURCES__ Swiss portals, filtered for the
+     Mendrisio district. Distances are calculated from __HOME_CITY__ as straight-line estimates.</p>
   <div class="stats">
-    <div class="stat"><b>__COUNT__</b><span>annunci attivi</span></div>
-    <div class="stat green"><b>__N_ADATTI__</b><span>adatti a te</span></div>
-    <div class="stat"><b>__NSOURCES__</b><span>portali</span></div>
+    <div class="stat"><b>__COUNT__</b><span>active jobs</span></div>
+    <div class="stat green"><b>__N_MATCHES__</b><span>good matches</span></div>
+    <div class="stat"><b>__NSOURCES__</b><span>sources</span></div>
   </div>
 </header>
 
 <div class="toolbar">
   <div class="toolbar-in">
     <div class="row1">
-      <input id="search" type="text" placeholder="Cerca titolo, azienda o città…">
+      <input id="search" type="text" placeholder="Search title, company, or city…">
       <select id="sort">
-        <option value="date">Più recenti</option>
-        <option value="km">Più vicini</option>
+        <option value="date">Newest</option>
+        <option value="km">Nearest</option>
       </select>
-      <span class="count"><b id="visible-n">__COUNT__</b> risultati</span>
+      <span class="count"><b id="visible-n">__COUNT__</b> results</span>
     </div>
     <div class="chips">
-      <button class="chip active" data-cat="all">Tutti <span class="n">__COUNT__</span></button>
+      <button class="chip active" data-cat="all">All <span class="n">__COUNT__</span></button>
       __CAT_CHIPS__
-      <button class="chip chip-ai" id="chip-ai">✔ Adatti a me__CHIP_AI_N__</button>
+      <button class="chip chip-ai" id="chip-ai">✔ Good matches__CHIP_AI_N__</button>
     </div>
   </div>
 </div>
@@ -500,38 +508,38 @@ footer {
 __CARDS__
   </div>
   <div class="empty" id="empty">
-    <h3>Nessun risultato</h3>
+    <h3>No results</h3>
     <p>__EMPTY_SUB__</p>
   </div>
 </main>
 
 <footer>
-  Fonti: __SOURCELIST__<br>
-  Dashboard frontaliere · stipendi e distanze sono stime indicative
+  Sources: __SOURCELIST__<br>
+  Cross-border dashboard · salary and distance figures are indicative estimates
 </footer>
 
 <script>
 "use strict";
 
-const state = { cat: "all", ai: false, q: "" };
+const state = { category: "all", aiOnly: false, query: "" };
 const grid  = document.getElementById("grid");
 const cards = Array.from(grid.querySelectorAll(".card"));
 
-// Ordine originale (= più recenti, già ordinato dal generatore)
-cards.forEach((c, i) => { c.dataset.order = i; });
+// Original order means newest first, as sorted by the generator.
+cards.forEach((card, index) => { card.dataset.order = index; });
 
 function applyFilters() {
-  let visibili = 0;
+  let visible = 0;
   for (const card of cards) {
-    const okCat = state.cat === "all" || card.dataset.category === state.cat;
-    const okAI  = !state.ai || card.dataset.ai === "adatto";
-    const okQ   = !state.q  || card.dataset.search.includes(state.q);
-    const show  = okCat && okAI && okQ;
+    const okCategory = state.category === "all" || card.dataset.category === state.category;
+    const okAI = !state.aiOnly || card.dataset.ai === "match";
+    const okQuery = !state.query || card.dataset.search.includes(state.query);
+    const show = okCategory && okAI && okQuery;
     card.style.display = show ? "" : "none";
-    if (show) visibili++;
+    if (show) visible++;
   }
-  document.getElementById("visible-n").textContent = visibili;
-  document.getElementById("empty").classList.toggle("show", visibili === 0);
+  document.getElementById("visible-n").textContent = visible;
+  document.getElementById("empty").classList.toggle("show", visible === 0);
 }
 
 function applySort(mode) {
@@ -544,37 +552,37 @@ function applySort(mode) {
   for (const card of sorted) grid.appendChild(card);
 }
 
-// Ricerca live
-document.getElementById("search").addEventListener("input", (e) => {
-  state.q = e.target.value.toLowerCase().trim();
+// Live search.
+document.getElementById("search").addEventListener("input", (event) => {
+  state.query = event.target.value.toLowerCase().trim();
   applyFilters();
 });
 
-// Ordinamento
-document.getElementById("sort").addEventListener("change", (e) => {
-  applySort(e.target.value);
+// Sorting.
+document.getElementById("sort").addEventListener("change", (event) => {
+  applySort(event.target.value);
 });
 
-// Chip categorie (delegato: un solo listener)
-document.querySelector(".chips").addEventListener("click", (e) => {
-  const chip = e.target.closest(".chip");
+// Category and AI chips use one delegated listener.
+document.querySelector(".chips").addEventListener("click", (event) => {
+  const chip = event.target.closest(".chip");
   if (!chip) return;
 
   if (chip.id === "chip-ai") {
-    state.ai = !state.ai;
-    chip.classList.toggle("active", state.ai);
+    state.aiOnly = !state.aiOnly;
+    chip.classList.toggle("active", state.aiOnly);
   } else {
-    state.cat = chip.dataset.cat;
-    document.querySelectorAll(".chip[data-cat]").forEach(b => b.classList.remove("active"));
+    state.category = chip.dataset.cat;
+    document.querySelectorAll(".chip[data-cat]").forEach(button => button.classList.remove("active"));
     chip.classList.add("active");
   }
   applyFilters();
 });
 
-// "/" focalizza la ricerca
-addEventListener("keydown", (e) => {
-  if (e.key === "/" && document.activeElement.tagName !== "INPUT") {
-    e.preventDefault();
+// Press "/" to focus search.
+addEventListener("keydown", (event) => {
+  if (event.key === "/" && document.activeElement.tagName !== "INPUT") {
+    event.preventDefault();
     document.getElementById("search").focus();
   }
 });
@@ -585,68 +593,69 @@ addEventListener("keydown", (e) => {
 """
 
 
-# ────────────────────────────────────────────────────────────────
-# Generazione pagina
-# ────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------
+# Page generation
+# ----------------------------------------------------------------
 
-def _conta_per_categoria(jobs: list) -> dict:
-    conteggi: dict[str, int] = {}
+def _count_by_category(jobs: list[Job]) -> dict[str, int]:
+    counts: dict[str, int] = {}
     for job in jobs:
-        categoria = job.get("category", "altro")
-        conteggi[categoria] = conteggi.get(categoria, 0) + 1
-    return conteggi
+        category_id = str(job.get("category") or "other")
+        counts[category_id] = counts.get(category_id, 0) + 1
+    return counts
 
 
-def _chips_categorie(conteggi: dict) -> str:
-    """Un bottone-chip per ogni categoria presente (ordine di CATEGORY)."""
-    chips = []
-    for cat_id, (colore, etichetta) in CATEGORY.items():
-        n = conteggi.get(cat_id, 0)
-        if n == 0:
+def _category_chips(counts: dict[str, int]) -> str:
+    """Build one chip button for each category present in the current jobs."""
+    chips: list[str] = []
+    for category_id, (color, label) in CATEGORY.items():
+        count = counts.get(category_id, 0)
+        if count == 0:
             continue
         chips.append(
-            f'<button class="chip" data-cat="{cat_id}" style="--chip-accent:{colore}">'
-            f'<span class="chip-dot"></span>{etichetta} <span class="n">{n}</span></button>'
+            f'<button class="chip" data-cat="{category_id}" style="--chip-accent:{color}">'
+            f'<span class="chip-dot"></span>{label} <span class="n">{count}</span></button>'
         )
     return "\n      ".join(chips)
 
 
-def _lista_fonti(jobs: list) -> tuple[int, str]:
-    """(numero portali, elenco leggibile) dalle fonti realmente presenti."""
-    presenti = {j.get("source", "") for j in jobs if j.get("source")}
-    if not presenti:
+def _source_list(jobs: list[Job]) -> tuple[int, str]:
+    """Return the number of sources and a readable source list actually present."""
+    present_sources = {str(job.get("source")) for job in jobs if job.get("source")}
+    if not present_sources:
         return len(SOURCE_LABEL), " · ".join(SOURCE_LABEL.values())
-    nomi = sorted(SOURCE_LABEL.get(s, s) for s in presenti)
-    return len(presenti), " · ".join(nomi)
+    names = sorted(SOURCE_LABEL.get(source, source) for source in present_sources)
+    return len(present_sources), " · ".join(names)
 
 
-def generate_html(jobs: list, output_path: str = "index.html") -> None:
-    adesso = datetime.now().strftime("%d/%m/%Y · %H:%M")
-    totale = len(jobs)
-    adatti = sum(1 for j in jobs if j.get("llm_adatto") is True)
-    conteggi = _conta_per_categoria(jobs)
-    n_fonti, elenco_fonti = _lista_fonti(jobs)
+def generate_html(jobs: list[Job], output_path: str | Path = "index.html") -> None:
+    now = datetime.now().strftime("%Y-%m-%d · %H:%M")
+    total = len(jobs)
+    matches = sum(1 for job in jobs if job.get("llm_adatto") is True)
+    counts = _count_by_category(jobs)
+    source_count, source_names = _source_list(jobs)
 
     cards = "\n".join(build_card(job) for job in jobs)
-    chip_ai_n = f' <span class="n">{adatti}</span>' if adatti else ""
-    empty_sub = ("Prova a cambiare i filtri o la ricerca." if jobs
-                 else "Nessun annuncio in cache: esegui python scraper.py")
+    chip_ai_count = f' <span class="n">{matches}</span>' if matches else ""
+    empty_subtitle = ("Try changing the filters or search text." if jobs
+                      else "No cached jobs yet: run python main.py")
 
-    pagina = (_TEMPLATE
-        .replace("__NOW__",        _e(adesso))
-        .replace("__N_ADATTI__",   str(adatti))
-        .replace("__CHIP_AI_N__",  chip_ai_n)
-        .replace("__COUNT__",      str(totale))
-        .replace("__NSOURCES__",   str(n_fonti))
-        .replace("__SOURCELIST__", _e(elenco_fonti))
-        .replace("__CAT_CHIPS__",  _chips_categorie(conteggi))
+    page = (_TEMPLATE
+        .replace("__NOW__",        _escape_html(now))
+        .replace("__N_MATCHES__",  str(matches))
+        .replace("__CHIP_AI_N__",  chip_ai_count)
+        .replace("__COUNT__",      str(total))
+        .replace("__NSOURCES__",   str(source_count))
+        .replace("__SOURCELIST__", _escape_html(source_names))
+        .replace("__CAT_CHIPS__",  _category_chips(counts))
         .replace("__CARDS__",      cards)
-        .replace("__EMPTY_SUB__",  empty_sub)
+        .replace("__EMPTY_SUB__",  empty_subtitle)
+        .replace("__HOME_CITY__",  _escape_html(HOME_CITY))
     )
 
     if not jobs:
-        pagina = pagina.replace('<div class="empty" id="empty">',
-                                '<div class="empty show" id="empty">')
+        page = page.replace('<div class="empty" id="empty">',
+                            '<div class="empty show" id="empty">')
 
-    Path(output_path).write_text(pagina, encoding="utf-8")
-    print(f"[OK] Dashboard generata: {output_path} ({totale} annunci)")
+    Path(output_path).write_text(page, encoding="utf-8")
+    print(f"[OK] Dashboard generated: {output_path} ({total} jobs)")
