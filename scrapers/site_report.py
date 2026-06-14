@@ -17,8 +17,7 @@
 from __future__ import annotations
 
 import json
-import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -59,22 +58,9 @@ class RunReport:
 
     def finish(self, site: str, jobs: int, duration_s: float,
                status: str = "", reason: str = "", attempts: int = 1) -> SiteResult:
-        ov = self._overrides.get(site, {})
-        if not status:
-            status = "ok" if jobs > 0 else "empty"
-        # A scraper override (gate/block) wins over calculated status.
-        # If jobs were collected, downgrade the override to ok_partial.
-        if ov:
-            status = ov["status"]
-            reason = ov["reason"] or reason
-            if jobs > 0 and ov["status"] in ("requires_auth", "requires_manual_login", "blocked"):
-                status = "ok_partial"
-                reason = f"{ov['status']}: {ov['reason']}" if ov["reason"] else ov["status"]
-        r = SiteResult(
-            site=site, status=status, jobs=jobs,
-            duration_s=round(duration_s, 1), attempts=attempts, reason=reason,
-            final_url=ov.get("final_url", ""), screenshot=ov.get("screenshot", ""),
-        )
+        status = _calculated_status(jobs, status)
+        status, reason = _status_with_override(jobs, status, reason, self._overrides.get(site, {}))
+        r = _site_result(site, jobs, duration_s, attempts, status, reason, self._overrides.get(site, {}))
         self._results[site] = r
         return r
 
@@ -107,6 +93,50 @@ class RunReport:
         print(f"  {n_ok}/{len(self.results)} sites with jobs collected\n")
 
 
+def _calculated_status(jobs: int, status: str) -> str:
+    if status:
+        return status
+    return "ok" if jobs > 0 else "empty"
+
+
+def _status_with_override(
+    jobs: int,
+    status: str,
+    reason: str,
+    override: dict,
+) -> tuple[str, str]:
+    if not override:
+        return status, reason
+
+    status = override["status"]
+    reason = override["reason"] or reason
+    if jobs > 0 and status in ("requires_auth", "requires_manual_login", "blocked"):
+        return "ok_partial", _partial_reason(status, override["reason"])
+    return status, reason
+
+
+def _partial_reason(status: str, reason: str) -> str:
+    if reason:
+        return f"{status}: {reason}"
+    return status
+
+
+def _site_result(
+    site: str,
+    jobs: int,
+    duration_s: float,
+    attempts: int,
+    status: str,
+    reason: str,
+    override: dict,
+) -> SiteResult:
+    return SiteResult(
+        site=site, status=status, jobs=jobs,
+        duration_s=round(duration_s, 1), attempts=attempts, reason=reason,
+        final_url=override.get("final_url", ""), screenshot=override.get("screenshot", ""),
+    )
+
+
 # Shared instance imported by scrapers to report gates and blocks.
 run_report = RunReport()
 
@@ -116,6 +146,14 @@ def debug_artifacts(page: Page, tag: str) -> str:
     # Return the screenshot path, or "" if screenshot capture fails.
     # Never raises: this is called on error paths.
     DEBUG_DIR.mkdir(exist_ok=True)
+    shot = _save_screenshot(page, tag)
+    _save_html(page, tag)
+    if shot:
+        print(f"  [debug] {tag}: screenshot + HTML saved in {DEBUG_DIR}\\")
+    return shot
+
+
+def _save_screenshot(page: Page, tag: str) -> str:
     shot = ""
     try:
         shot_path = DEBUG_DIR / f"{tag}.png"
@@ -123,13 +161,14 @@ def debug_artifacts(page: Page, tag: str) -> str:
         shot = str(shot_path)
     except Exception:
         pass
+    return shot
+
+
+def _save_html(page: Page, tag: str) -> None:
     try:
         (DEBUG_DIR / f"{tag}.html").write_text(page.content(), encoding="utf-8")
     except Exception:
         pass
-    if shot:
-        print(f"  [debug] {tag}: screenshot + HTML saved in {DEBUG_DIR}\\")
-    return shot
 
 
 def classify_exception(e: Exception) -> tuple[str, str]:

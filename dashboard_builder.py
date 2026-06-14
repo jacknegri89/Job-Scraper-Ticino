@@ -20,6 +20,7 @@ from typing import Any
 
 from distance_calculator import HOME_CITY, km_from_home
 from salary_calculator import calculate_net_salary
+from ai_analyzer import AI_DESCRIPTION, AI_GROSS_SALARY, AI_REASON, AI_SUITABLE, normalize_ai_fields
 
 Job = dict[str, Any]
 CategoryInfo = tuple[str, str]
@@ -117,9 +118,10 @@ def _clean_raw(text: str) -> str:
 
 def _description_html(job: Job) -> str:
     """Prefer the AI description, then fall back to cleaned raw text."""
-    llm_description = str(job.get("llm_descrizione") or "").strip()
-    if llm_description:
-        return _escape_html(llm_description).replace("\n", "<br>")
+    normalize_ai_fields(job)
+    ai_description = str(job.get(AI_DESCRIPTION) or "").strip()
+    if ai_description:
+        return _escape_html(ai_description).replace("\n", "<br>")
 
     raw_description = str(job.get("description") or "").strip()
     if not raw_description:
@@ -127,7 +129,7 @@ def _description_html(job: Job) -> str:
     cleaned = _clean_raw(raw_description)
     if not cleaned:
         return ""
-    truncated = cleaned[:700] + ("…" if len(cleaned) > 700 else "")
+    truncated = cleaned[:700] + ("..." if len(cleaned) > 700 else "")
     return _escape_html(truncated)
 
 
@@ -139,53 +141,72 @@ def _description_block(job: Job) -> str:
 
 
 def _ai_block(job: Job) -> tuple[str, str]:
-    """
-    Return the data-ai value and the AI verdict HTML block.
-
-    data-ai is ``"match"``, ``"not_match"``, or ``"none"`` and is used by the
-    in-page filter.
-    """
-    is_match = job.get("llm_adatto")
-    reason = _escape_html(job.get("llm_motivo", ""))
-    reason_html = f'<p class="ai-why">{reason}</p>' if reason else ""
-
+    """Return the data-ai value and the visible AI verdict block."""
+    normalize_ai_fields(job)
+    is_match = job.get(AI_SUITABLE)
+    reason_html = _ai_reason_html(job)
     if is_match is True:
-        return "match", (
-            '<div class="ai ai-ok"><span class="ai-ico">✔</span><div>'
-            '<span class="ai-tag">Good match</span>' + reason_html + "</div></div>"
-        )
+        return _ai_result("match", "ai-ok", "&#10003;", "Good match", reason_html)
     if is_match is False:
-        return "not_match", (
-            '<div class="ai ai-no"><span class="ai-ico">✕</span><div>'
-            '<span class="ai-tag">Not a match</span>' + reason_html + "</div></div>"
-        )
+        return _ai_result("not_match", "ai-no", "&#10005;", "Not a match", reason_html)
     return "none", ""
+
+
+def _ai_reason_html(job: Job) -> str:
+    reason = _escape_html(job.get(AI_REASON, ""))
+    return f'<p class="ai-why">{reason}</p>' if reason else ""
+
+
+def _ai_result(filter_value: str, css_class: str, icon: str, label: str, reason_html: str) -> tuple[str, str]:
+    return filter_value, _ai_html(css_class, icon, label, reason_html)
+
+
+def _ai_html(css_class: str, icon: str, label: str, reason_html: str) -> str:
+    return (
+        f'<div class="ai {css_class}"><span class="ai-ico">{icon}</span><div>'
+        f'<span class="ai-tag">{label}</span>{reason_html}</div></div>'
+    )
 
 
 def _salary_block(job: Job) -> str:
     """Build the salary panel: Swiss gross pay to estimated Italian net pay."""
-    gross_salary = job.get("llm_stipendio_lordo")
-    if not gross_salary:
-        return ""
-    net_salary = calculate_net_salary(gross_salary)
+    normalize_ai_fields(job)
+    net_salary = _net_salary(job)
     if not net_salary:
         return ""
-    return (
+    return _salary_panel(net_salary)
+
+
+def _net_salary(job: Job) -> dict[str, int]:
+    gross_salary = job.get(AI_GROSS_SALARY)
+    if not gross_salary:
+        return {}
+    return calculate_net_salary(gross_salary)
+
+
+def _salary_panel(net_salary: dict[str, int]) -> str:
+    rows = [
         '<div class="salary">'
-        '<div class="sal-head">Estimated salary</div>'
-        f'<div class="sal-row"><span>Swiss gross</span>'
-        f'<span class="sal-num">{net_salary["gross_chf"]:,} CHF</span></div>'
-        f'<div class="sal-row deduct"><span>Swiss social contributions</span>'
-        f'<span class="sal-num">−{net_salary["social_chf"]:,} CHF</span></div>'
-        f'<div class="sal-row deduct"><span>Ticino withholding tax</span>'
-        f'<span class="sal-num">−{net_salary["withholding_chf"]:,} CHF</span></div>'
-        f'<div class="sal-row deduct"><span>Additional Italian income tax</span>'
-        f'<span class="sal-num">−{net_salary["extra_italian_tax_eur"]:,} €</span></div>'
-        f'<div class="sal-net"><span>Net in Italy</span>'
-        f'<span>~{net_salary["net_eur"]:,} €/month</span></div>'
-        '<p class="sal-note">Estimate ±15% · cross-border regime after 2023-07-17</p>'
-        "</div>"
-    )
+        '<div class="sal-head">Estimated salary</div>',
+        _salary_row("Swiss gross", f'{net_salary["gross_chf"]:,} CHF'),
+        _salary_row("Swiss social contributions", f'{net_salary["social_chf"]:,} CHF', deduct=True),
+        _salary_row("Ticino withholding tax", f'{net_salary["withholding_chf"]:,} CHF', deduct=True),
+        _salary_row("Additional Italian income tax", f'{net_salary["extra_italian_tax_eur"]:,} &euro;', deduct=True),
+        _salary_net_row(net_salary["net_eur"]),
+        '<p class="sal-note">Estimate &plusmn;15% &middot; cross-border regime after 2023-07-17</p>',
+        "</div>",
+    ]
+    return "".join(rows)
+
+
+def _salary_row(label: str, value: str, deduct: bool = False) -> str:
+    row_class = "sal-row deduct" if deduct else "sal-row"
+    prefix = "&minus;" if deduct else ""
+    return f'<div class="{row_class}"><span>{label}</span><span class="sal-num">{prefix}{value}</span></div>'
+
+
+def _salary_net_row(net_eur: int) -> str:
+    return f'<div class="sal-net"><span>Net in Italy</span><span>~{net_eur:,} &euro;/month</span></div>'
 
 
 def _email_block(job: Job) -> str:
@@ -193,7 +214,7 @@ def _email_block(job: Job) -> str:
     if not email:
         return ""
     escaped_email = _escape_html(email)
-    return f'<a class="email-link" href="mailto:{escaped_email}">✉ {escaped_email}</a>'
+    return f'<a class="email-link" href="mailto:{escaped_email}">&#9993; {escaped_email}</a>'
 
 
 def _distance_of(job: Job) -> float | None:
@@ -225,38 +246,73 @@ def _search_blob(job: Job) -> str:
 # ----------------------------------------------------------------
 
 def build_card(job: Job) -> str:
+    view = _card_view(job)
+    return _card_html(job, view)
+
+
+def _card_view(job: Job) -> dict[str, Any]:
     category_id = str(job.get("category") or "other")
     color, category_label = CATEGORY.get(category_id, CATEGORY["other"])
     source_id = str(job.get("source") or "")
-    source = SOURCE_LABEL.get(source_id, _escape_html(source_id))
-
     km = _distance_of(job)
-    km_attr = f"{km:.1f}" if km is not None else "9999"  # Put unknown distances last.
-
     ai_filter, ai_html = _ai_block(job)
-    home_city_label = _escape_html(HOME_CITY)
+    return {
+        "category_id": category_id, "color": color, "category_label": category_label,
+        "source": SOURCE_LABEL.get(source_id, _escape_html(source_id)),
+        "km": km, "km_attr": f"{km:.1f}" if km is not None else "9999",
+        "ai_filter": ai_filter, "ai_html": ai_html,
+    }
 
-    return f"""<article class="card" data-category="{_escape_html(category_id)}" data-ai="{ai_filter}"
-  data-km="{km_attr}" data-search="{_search_blob(job)}" style="--accent:{color}">
-  <div class="card-head">
-    <span class="card-cat"><span class="cat-dot"></span>{category_label}</span>
-    <span class="card-source">{source}</span>
-  </div>
-  <h2 class="card-title">{_escape_html(job.get("title", ""))}</h2>
-  <p class="card-company">{_escape_html(job.get("company", "")) or "&nbsp;"}</p>
-  {_description_block(job)}
-  {ai_html}
-  <div class="card-meta">
-    <div><span class="meta-k">Location</span><span class="meta-v">{_escape_html(job.get("city", ""))}</span></div>
-    <div><span class="meta-k">From {home_city_label}</span><span class="meta-v">{_distance_label(km)}</span></div>
-    <div><span class="meta-k">Posted</span><span class="meta-v">{_escape_html(job.get("date", "")) or "-"}</span></div>
-  </div>
-  {_salary_block(job)}
-  {_email_block(job)}
-  <a class="apply-btn" href="{_safe_url(job)}" target="_blank" rel="noopener noreferrer">
-    Apply <span class="arrow">→</span>
-  </a>
-</article>"""
+
+def _card_html(job: Job, view: dict[str, Any]) -> str:
+    return "\n".join([
+        _card_open(job, view), _card_header(view), _card_title(job),
+        _description_block(job), view["ai_html"], _card_meta(job, view),
+        _salary_block(job), _email_block(job), _apply_link(job), "</article>",
+    ])
+
+
+def _card_open(job: Job, view: dict[str, Any]) -> str:
+    return (
+        f'<article class="card" data-category="{_escape_html(view["category_id"])}" '
+        f'data-ai="{view["ai_filter"]}" data-km="{view["km_attr"]}" '
+        f'data-search="{_search_blob(job)}" style="--accent:{view["color"]}">'
+    )
+
+
+def _card_header(view: dict[str, Any]) -> str:
+    return (
+        '<div class="card-head">'
+        f'<span class="card-cat"><span class="cat-dot"></span>{view["category_label"]}</span>'
+        f'<span class="card-source">{view["source"]}</span></div>'
+    )
+
+
+def _card_title(job: Job) -> str:
+    title = _escape_html(job.get("title", ""))
+    company = _escape_html(job.get("company", "")) or "&nbsp;"
+    return f'<h2 class="card-title">{title}</h2><p class="card-company">{company}</p>'
+
+
+def _card_meta(job: Job, view: dict[str, Any]) -> str:
+    return '<div class="card-meta">' + "".join(_card_meta_rows(job, view)) + "</div>"
+
+
+def _card_meta_rows(job: Job, view: dict[str, Any]) -> list[str]:
+    home_city_label = _escape_html(HOME_CITY)
+    return [
+        _meta_row("Location", _escape_html(job.get("city", ""))),
+        _meta_row(f"From {home_city_label}", _distance_label(view["km"])),
+        _meta_row("Posted", _escape_html(job.get("date", "")) or "-"),
+    ]
+
+
+def _meta_row(label: str, value: str) -> str:
+    return f'<div><span class="meta-k">{label}</span><span class="meta-v">{value}</span></div>'
+
+
+def _apply_link(job: Job) -> str:
+    return f'<a class="apply-btn" href="{_safe_url(job)}" target="_blank" rel="noopener noreferrer">Apply <span class="arrow">&rarr;</span></a>'
 
 
 # ----------------------------------------------------------------
@@ -268,8 +324,8 @@ _TEMPLATE = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ticino Jobs — cross-border dashboard</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23161B22%22/><text x=%2232%22 y=%2243%22 font-size=%2230%22 text-anchor=%22middle%22 fill=%22%233FB950%22>●</text></svg>">
+<title>Ticino Jobs - cross-border dashboard</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23161B22%22/><circle cx=%2232%22 cy=%2232%22 r=%2210%22 fill=%22%233FB950%22/></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -473,7 +529,7 @@ footer {
 
 <header>
   <div class="h-top">
-    <h1><span class="dot">●</span> Ticino Jobs</h1>
+    <h1><span class="dot">&bull;</span> Ticino Jobs</h1>
     <span class="updated">Last updated __NOW__</span>
   </div>
   <p class="subtitle">Jobs from __NSOURCES__ Swiss portals, filtered for the
@@ -488,7 +544,7 @@ footer {
 <div class="toolbar">
   <div class="toolbar-in">
     <div class="row1">
-      <input id="search" type="text" placeholder="Search title, company, or city…">
+      <input id="search" type="text" placeholder="Search title, company, or city...">
       <select id="sort">
         <option value="date">Newest</option>
         <option value="km">Nearest</option>
@@ -498,7 +554,7 @@ footer {
     <div class="chips">
       <button class="chip active" data-cat="all">All <span class="n">__COUNT__</span></button>
       __CAT_CHIPS__
-      <button class="chip chip-ai" id="chip-ai">✔ Good matches__CHIP_AI_N__</button>
+      <button class="chip chip-ai" id="chip-ai">&#10003; Good matches__CHIP_AI_N__</button>
     </div>
   </div>
 </div>
@@ -515,7 +571,7 @@ __CARDS__
 
 <footer>
   Sources: __SOURCELIST__<br>
-  Cross-border dashboard · salary and distance figures are indicative estimates
+  Cross-border dashboard &middot; salary and distance figures are indicative estimates
 </footer>
 
 <script>
@@ -623,39 +679,55 @@ def _source_list(jobs: list[Job]) -> tuple[int, str]:
     """Return the number of sources and a readable source list actually present."""
     present_sources = {str(job.get("source")) for job in jobs if job.get("source")}
     if not present_sources:
-        return len(SOURCE_LABEL), " · ".join(SOURCE_LABEL.values())
+        return len(SOURCE_LABEL), " | ".join(SOURCE_LABEL.values())
     names = sorted(SOURCE_LABEL.get(source, source) for source in present_sources)
-    return len(present_sources), " · ".join(names)
+    return len(present_sources), " | ".join(names)
 
 
 def generate_html(jobs: list[Job], output_path: str | Path = "index.html") -> None:
-    now = datetime.now().strftime("%Y-%m-%d · %H:%M")
-    total = len(jobs)
-    matches = sum(1 for job in jobs if job.get("llm_adatto") is True)
+    jobs = [normalize_ai_fields(job) for job in jobs]
+    page = _dashboard_page(jobs)
+    Path(output_path).write_text(page, encoding="utf-8")
+    print(f"[OK] Dashboard generated: {output_path} ({len(jobs)} jobs)")
+
+
+def _dashboard_page(jobs: list[Job]) -> str:
+    page = _fill_template(_template_replacements(jobs))
+    if not jobs:
+        return _show_empty_state(page)
+    return page
+
+
+def _template_replacements(jobs: list[Job]) -> dict[str, str]:
+    matches = sum(1 for job in jobs if job.get(AI_SUITABLE) is True)
     counts = _count_by_category(jobs)
     source_count, source_names = _source_list(jobs)
+    return {
+        "__NOW__": _escape_html(datetime.now().strftime("%Y-%m-%d - %H:%M")), "__N_MATCHES__": str(matches),
+        "__CHIP_AI_N__": _ai_chip_count(matches), "__COUNT__": str(len(jobs)),
+        "__NSOURCES__": str(source_count), "__SOURCELIST__": _escape_html(source_names),
+        "__CAT_CHIPS__": _category_chips(counts), "__HOME_CITY__": _escape_html(HOME_CITY),
+        "__CARDS__": "\n".join(build_card(job) for job in jobs),
+        "__EMPTY_SUB__": _empty_subtitle(jobs),
+    }
 
-    cards = "\n".join(build_card(job) for job in jobs)
-    chip_ai_count = f' <span class="n">{matches}</span>' if matches else ""
-    empty_subtitle = ("Try changing the filters or search text." if jobs
-                      else "No cached jobs yet: run python main.py")
 
-    page = (_TEMPLATE
-        .replace("__NOW__",        _escape_html(now))
-        .replace("__N_MATCHES__",  str(matches))
-        .replace("__CHIP_AI_N__",  chip_ai_count)
-        .replace("__COUNT__",      str(total))
-        .replace("__NSOURCES__",   str(source_count))
-        .replace("__SOURCELIST__", _escape_html(source_names))
-        .replace("__CAT_CHIPS__",  _category_chips(counts))
-        .replace("__CARDS__",      cards)
-        .replace("__EMPTY_SUB__",  empty_subtitle)
-        .replace("__HOME_CITY__",  _escape_html(HOME_CITY))
-    )
+def _ai_chip_count(matches: int) -> str:
+    return f' <span class="n">{matches}</span>' if matches else ""
 
-    if not jobs:
-        page = page.replace('<div class="empty" id="empty">',
-                            '<div class="empty show" id="empty">')
 
-    Path(output_path).write_text(page, encoding="utf-8")
-    print(f"[OK] Dashboard generated: {output_path} ({total} jobs)")
+def _empty_subtitle(jobs: list[Job]) -> str:
+    if jobs:
+        return "Try changing the filters or search text."
+    return "No cached jobs yet: run python main.py"
+
+
+def _fill_template(replacements: dict[str, str]) -> str:
+    page = _TEMPLATE
+    for marker, value in replacements.items():
+        page = page.replace(marker, value)
+    return page
+
+
+def _show_empty_state(page: str) -> str:
+    return page.replace('<div class="empty" id="empty">', '<div class="empty show" id="empty">')

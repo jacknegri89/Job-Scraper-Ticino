@@ -8,14 +8,15 @@ def calculate_net_salary(gross_chf: float | int | None) -> dict[str, int]:
     """Return a rough monthly net salary estimate from a gross CHF amount."""
     if gross_chf is None or gross_chf <= 0:
         return {}
+    return _calculate_valid_salary(float(gross_chf))
 
-    gross_value = float(gross_chf)
+
+def _calculate_valid_salary(gross_value: float) -> dict[str, int]:
     social_chf = _swiss_social_contributions(gross_value)
     withholding_chf = _monthly_withholding_tax(gross_value, social_chf)
     net_before_italy_chf = gross_value - social_chf - withholding_chf
     extra_italian_tax_eur = _monthly_italian_tax(gross_value, withholding_chf)
     final_net_chf = net_before_italy_chf - (extra_italian_tax_eur / CHF_EUR_RATE)
-
     return _salary_result(
         gross_value,
         social_chf,

@@ -84,105 +84,176 @@ def _scrape_city(
     city_name: str,
     seen_urls: set[str],
 ) -> list[dict[str, str]]:
-    jobs = []
+    jobs: list[dict[str, str]] = []
     for page_num in range(MAX_PAGES):
-        if page_num == 0:
-            url = f"{BASE_URL}/it/trova-lavoro/citta/{city_slug}"
-        else:
-            url = f"{BASE_URL}/it/trova-lavoro/citta/{city_slug}/p{page_num}"
-
-        print(f"  [manpower.ch] {city_name} page {page_num + 1}...")
-        try:
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        except Exception as e:
-            if _page_closed(e):
-                print(f"  [manpower.ch] {city_name}: page closed during navigation - stop")
-                break
-            page.wait_for_timeout(3000)
-
-        if page_num == 0:
-            dismiss_cookie_dialog(page)
-            page.wait_for_timeout(1500)
-
-        # Wait until job links appear.
-        try:
-            page.wait_for_selector('a[href*="/it/job/"]', timeout=8000)
-        except Exception as e:
-            if _page_closed(e):
-                print(f"  [manpower.ch] {city_name}: page closed while waiting - stop")
-                break
-            print(f"  [manpower.ch] {city_name}: no job link found - stop")
-            if page_num == 0:
-                shot = debug_artifacts(page, "manpower_ch_nocards")
-                run_report.set_status(
-                    "manpower.ch", "selector_broken",
-                    f"{city_name}: no job link on page 1",
-                    final_url=url, screenshot=shot)
-            break
-
-        try:
-            human_scroll(page)
-            page.wait_for_timeout(1000)
-        except Exception as e:
-            if _page_closed(e):
-                print(f"  [manpower.ch] {city_name}: page closed during scroll - stop")
-                break
-            raise
-
-        try:
-            raw = page.evaluate(_JS_EXTRACT)
-        except Exception as e:
-            if _page_closed(e):
-                print(f"  [manpower.ch] {city_name}: page closed during extraction - stop")
-                break
-            raise
-        if not raw:
-            break
-
-        batch = []
-        for item in raw:
-            job_url = item.get("url", "")
-            title   = item.get("title", "").strip()
-            if not title or job_url in seen_urls:
-                continue
-            seen_urls.add(job_url)
-
-            raw_date = item.get("dateStr", "")
-            batch.append({
-                "title":    title,
-                "company":  "Manpower",
-                "city":     item.get("city", city_name).strip(),
-                "date":     _parse_date(raw_date) if raw_date else date.today().isoformat(),
-                "url":      job_url,
-                "category": categorize_job(title),
-                "source":   "manpower.ch",
-            })
-
+        batch = _scrape_city_page(page, city_slug, city_name, page_num, seen_urls)
         if not batch:
             break
-
         jobs.extend(batch)
         print(f"  [manpower.ch] {city_name}: {len(batch)} new (total {len(jobs)})")
         human_delay(1.5, 3.5)
-
     return jobs
+
+
+def _scrape_city_page(
+    page: Page,
+    city_slug: str,
+    city_name: str,
+    page_num: int,
+    seen_urls: set[str],
+) -> list[dict[str, str]]:
+    url = _city_page_url(city_slug, page_num)
+    if not _prepare_city_page(page, city_name, page_num, url):
+        return []
+    raw = _extract_raw_jobs(page, city_name)
+    if not raw:
+        return []
+    return _build_batch(raw, city_name, seen_urls)
+
+
+def _prepare_city_page(page: Page, city_name: str, page_num: int, url: str) -> bool:
+    if not _open_city_page(page, city_name, page_num, url):
+        return False
+    _handle_first_page_cookie(page, page_num)
+    return _wait_for_job_links(page, city_name, page_num, url)
+
+
+def _city_page_url(city_slug: str, page_num: int) -> str:
+    if page_num == 0:
+        return f"{BASE_URL}/it/trova-lavoro/citta/{city_slug}"
+    return f"{BASE_URL}/it/trova-lavoro/citta/{city_slug}/p{page_num}"
+
+
+def _open_city_page(page: Page, city_name: str, page_num: int, url: str) -> bool:
+    print(f"  [manpower.ch] {city_name} page {page_num + 1}...")
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        return True
+    except Exception as exc:
+        if _page_closed(exc):
+            print(f"  [manpower.ch] {city_name}: page closed during navigation - stop")
+            return False
+        page.wait_for_timeout(3000)
+        return True
+
+
+def _handle_first_page_cookie(page: Page, page_num: int) -> None:
+    if page_num == 0:
+        dismiss_cookie_dialog(page)
+        page.wait_for_timeout(1500)
+
+
+def _wait_for_job_links(page: Page, city_name: str, page_num: int, url: str) -> bool:
+    try:
+        page.wait_for_selector('a[href*="/it/job/"]', timeout=8000)
+        return True
+    except Exception as exc:
+        return _handle_missing_links(page, city_name, page_num, url, exc)
+
+
+def _handle_missing_links(
+    page: Page,
+    city_name: str,
+    page_num: int,
+    url: str,
+    exc: Exception,
+) -> bool:
+    if _page_closed(exc):
+        print(f"  [manpower.ch] {city_name}: page closed while waiting - stop")
+        return False
+    print(f"  [manpower.ch] {city_name}: no job link found - stop")
+    if page_num == 0:
+        _report_missing_links(page, city_name, url)
+    return False
+
+
+def _report_missing_links(page: Page, city_name: str, url: str) -> None:
+    shot = debug_artifacts(page, "manpower_ch_nocards")
+    run_report.set_status(
+        "manpower.ch", "selector_broken",
+        f"{city_name}: no job link on page 1",
+        final_url=url, screenshot=shot)
+
+
+def _extract_raw_jobs(page: Page, city_name: str) -> list[dict[str, str]]:
+    _scroll_before_extract(page, city_name)
+    try:
+        return page.evaluate(_JS_EXTRACT)
+    except Exception as exc:
+        if _page_closed(exc):
+            print(f"  [manpower.ch] {city_name}: page closed during extraction - stop")
+            return []
+        raise
+
+
+def _scroll_before_extract(page: Page, city_name: str) -> None:
+    try:
+        human_scroll(page)
+        page.wait_for_timeout(1000)
+    except Exception as exc:
+        if _page_closed(exc):
+            print(f"  [manpower.ch] {city_name}: page closed during scroll - stop")
+            return
+        raise
+
+
+def _build_batch(
+    raw: list[dict[str, str]],
+    city_name: str,
+    seen_urls: set[str],
+) -> list[dict[str, str]]:
+    jobs = [_build_job(item, city_name, seen_urls) for item in raw]
+    return [job for job in jobs if job is not None]
+
+
+def _build_job(
+    item: dict[str, str],
+    city_name: str,
+    seen_urls: set[str],
+) -> dict[str, str] | None:
+    job_url = item.get("url", "")
+    title = item.get("title", "").strip()
+    if not title or job_url in seen_urls:
+        return None
+    seen_urls.add(job_url)
+    return _job_from_item(item, title, city_name, job_url)
+
+
+def _job_from_item(item: dict[str, str], title: str, city_name: str, job_url: str) -> dict[str, str]:
+    raw_date = item.get("dateStr", "")
+    job_date = _parse_date(raw_date) if raw_date else date.today().isoformat()
+    return {
+        "title": title,
+        "company": "Manpower",
+        "city": item.get("city", city_name).strip(),
+        "date": job_date,
+        "url": job_url,
+        "category": categorize_job(title),
+        "source": "manpower.ch",
+    }
 
 
 @retry()
 def scrape_manpower_ch(context: BrowserContext) -> list[dict[str, str]]:
-    all_jobs  = []
+    all_jobs: list[dict[str, str]] = []
     seen_urls = set()
-
     for city_slug, city_name in _TICINO_CITIES:
-        page = new_stealth_page(context)
-        try:
-            city_jobs = _scrape_city(page, city_slug, city_name, seen_urls)
-        finally:
-            try:
-                page.close()
-            except Exception:
-                pass
-        all_jobs.extend(city_jobs)
-
+        all_jobs.extend(_scrape_city_with_new_page(context, city_slug, city_name, seen_urls))
     print(f"  [manpower.ch] {len(all_jobs)} jobs found")
     return all_jobs
+
+
+def _scrape_city_with_new_page(
+    context: BrowserContext,
+    city_slug: str,
+    city_name: str,
+    seen_urls: set[str],
+) -> list[dict[str, str]]:
+    page = new_stealth_page(context)
+    try:
+        return _scrape_city(page, city_slug, city_name, seen_urls)
+    finally:
+        try:
+            page.close()
+        except Exception:
+            pass

@@ -70,46 +70,40 @@ def _relative_to_date(text: str) -> str:
     Handles both the datetime attribute, already ISO, and text such as
     '3 weeks ago', '2 days ago', '1 month ago', 'just now'.
     """
+    raw_text = text.strip()
+    if re.match(r'^\d{4}-\d{2}-\d{2}', raw_text):
+        return raw_text[:10]
+    lowered = raw_text.lower()
+    if _means_today(lowered):
+        return date.today().isoformat()
+    return _relative_number_date(lowered)
+
+
+def _means_today(lowered: str) -> bool:
+    today_words = ("just", "now", "oggi")
+    return not lowered or any(word in lowered for word in today_words)
+
+
+def _relative_number_date(lowered: str) -> str:
     today = date.today()
-    t = text.strip()
-
-    # datetime attribute already uses ISO YYYY-MM-DD.
-    if re.match(r'^\d{4}-\d{2}-\d{2}', t):
-        return t[:10]
-
-    t_lower = t.lower()
-    if not t_lower or "just" in t_lower or "now" in t_lower or "oggi" in t_lower:
+    for pattern, multiplier in _relative_patterns():
+        match = re.search(pattern, lowered)
+        if match:
+            return (today - timedelta(days=int(match.group(1)) * multiplier)).isoformat()
+    if re.search(r'\d+\s*(hour|ora|ore)', lowered):
         return today.isoformat()
-
-    # "X hours ago" / "X ore fa".
-    if re.search(r'\d+\s*(hour|ora|ore)', t_lower):
-        return today.isoformat()
-
-    # "X days ago" / "X giorni fa".
-    m = re.search(r'(\d+)\s*day', t_lower)
-    if m:
-        return (today - timedelta(days=int(m.group(1)))).isoformat()
-    m = re.search(r'(\d+)\s*giorn', t_lower)
-    if m:
-        return (today - timedelta(days=int(m.group(1)))).isoformat()
-
-    # "X weeks ago" / "X settimane fa".
-    m = re.search(r'(\d+)\s*week', t_lower)
-    if m:
-        return (today - timedelta(weeks=int(m.group(1)))).isoformat()
-    m = re.search(r'(\d+)\s*settiman', t_lower)
-    if m:
-        return (today - timedelta(weeks=int(m.group(1)))).isoformat()
-
-    # "X months ago" / "X mesi fa".
-    m = re.search(r'(\d+)\s*month', t_lower)
-    if m:
-        return (today - timedelta(days=int(m.group(1)) * 30)).isoformat()
-    m = re.search(r'(\d+)\s*mes', t_lower)
-    if m:
-        return (today - timedelta(days=int(m.group(1)) * 30)).isoformat()
-
     return today.isoformat()
+
+
+def _relative_patterns() -> tuple[tuple[str, int], ...]:
+    return (
+        (r'(\d+)\s*day', 1),
+        (r'(\d+)\s*giorn', 1),
+        (r'(\d+)\s*week', 7),
+        (r'(\d+)\s*settiman', 7),
+        (r'(\d+)\s*month', 30),
+        (r'(\d+)\s*mes', 30),
+    )
 
 
 def _clean_url(href: str) -> str:
@@ -198,151 +192,204 @@ _JS_EXTRACT = r"""() => {
 
 @retry()
 def scrape_linkedin_ch(context: BrowserContext) -> list[dict[str, str]]:
-    """
-    Use a manually saved session when available, otherwise scrape public pages.
-    Never attempts automatic login.
-    """
-    all_jobs  = []
-    seen_urls = set()
-
-    auth_ctx = None
-    if has_auth_state("linkedin"):
-        try:
-            auth_ctx = context.browser.new_context(
-                storage_state=str(auth_state_path("linkedin")),
-                locale="it-CH", timezone_id="Europe/Zurich",
-            )
-            print("  [linkedin.ch] Using saved authenticated session")
-        except Exception as e:
-            print(f"  [linkedin.ch] Saved session unreadable ({e}) - public mode")
-            auth_ctx = None
-
+    """Use a saved session when available, otherwise scrape public pages."""
+    auth_ctx = _create_auth_context(context)
     page = new_stealth_page(auth_ctx or context)
     try:
-        for page_num in range(MAX_PAGES):
-            start = page_num * 25
-            url = (
-                f"{LIST_URL}?keywords=&location={_SEARCH_LOCATION}"
-                f"&f_TPR=r2592000"   # last 30 days
-                f"&start={start}"
-            )
-            print(f"  [linkedin.ch] Page {page_num + 1} (start={start})...")
-
-            try:
-                page.goto(url, wait_until="networkidle", timeout=45000)
-            except Exception:
-                try:
-                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                    page.wait_for_timeout(3000)
-                except Exception as e:
-                    print(f"  [linkedin.ch] Navigation error: {e}")
-                    break
-
-            # Report authwalls/login redirects; do not bypass them.
-            if _is_blocked(page):
-                shot = debug_artifacts(page, "linkedin_ch_authwall")
-                if auth_ctx:
-                    reason = ("authwall despite saved session - probably expired: "
-                              "rerun python scraper.py --auth linkedin")
-                else:
-                    reason = "authwall - for full access: python scraper.py --auth linkedin"
-                run_report.set_status("linkedin.ch", "requires_manual_login", reason,
-                                      final_url=page.url, screenshot=shot)
-                break
-
-            # Close non-blocking sign-in modals when present.
-            try:
-                dismiss_btn = page.query_selector(
-                    'button[aria-label*="Dismiss"], '
-                    'button[aria-label*="Close"], '
-                    'button.modal__dismiss'
-                )
-                if dismiss_btn and dismiss_btn.is_visible():
-                    dismiss_btn.click()
-                    page.wait_for_timeout(500)
-            except Exception:
-                pass
-
-            # Wait for cards to be present in the DOM.
-            card_loaded = False
-            for wait_sel in [
-                '[class*="base-card"]',
-                'a[href*="/jobs/view/"]',
-                'ul.jobs-search__results-list',
-            ]:
-                try:
-                    page.wait_for_selector(wait_sel, timeout=8000)
-                    card_loaded = True
-                    break
-                except Exception:
-                    pass
-
-            if not card_loaded:
-                print(f"  [linkedin.ch] No card found (title={page.title()[:60]!r}) - stop")
-                if page_num == 0:
-                    shot = debug_artifacts(page, "linkedin_ch_nocards")
-                    hint = (" - note: authenticated DOM differs from the public DOM;"
-                            " selectors need adjustment") if auth_ctx else ""
-                    run_report.set_status(
-                        "linkedin.ch", "selector_broken",
-                        f"no card on page 1 (title={page.title()[:50]!r}){hint}",
-                        final_url=page.url, screenshot=shot)
-                break
-
-            human_scroll(page)
-            page.wait_for_timeout(1500)
-
-            raw = page.evaluate(_JS_EXTRACT)
-            if not raw:
-                print(f"  [linkedin.ch] Empty page - stop")
-                if page_num == 0:
-                    debug_artifacts(page, "linkedin_ch_empty")
-                break
-
-            new_jobs = []
-            for item in raw:
-                job_url = item.get("href", "")
-                if not job_url or job_url in seen_urls:
-                    continue
-                seen_urls.add(job_url)
-
-                title = item.get("title", "").strip()
-                if not title:
-                    continue
-
-                # Absolute URL.
-                if job_url.startswith("/"):
-                    job_url = BASE_URL + job_url
-                elif not job_url.startswith("http"):
-                    continue
-
-                new_jobs.append({
-                    "title":    title,
-                    "company":  item.get("company", "").strip(),
-                    "city":     item.get("city", "").strip(),
-                    "date":     _relative_to_date(item.get("dateRaw", "")),
-                    "url":      job_url,
-                    "category": categorize_job(title),
-                    "source":   "linkedin.ch",
-                })
-
-            if not new_jobs:
-                print(f"  [linkedin.ch] No new jobs - stop")
-                break
-
-            all_jobs.extend(new_jobs)
-            print(f"  [linkedin.ch] {len(new_jobs)} new (total {len(all_jobs)})")
-            human_delay(2.5, 5.0)
-
-        print(f"  [linkedin.ch] {len(all_jobs)} jobs found")
-        return all_jobs
+        return _scrape_all_pages(page, auth_ctx is not None)
     finally:
+        _close_resources(page, auth_ctx)
+
+
+def _scrape_all_pages(page: Page, using_auth: bool) -> list[dict[str, str]]:
+    all_jobs: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for page_num in range(MAX_PAGES):
+        if not _add_page_jobs(page, page_num, using_auth, seen_urls, all_jobs):
+            break
+    print(f"  [linkedin.ch] {len(all_jobs)} jobs found")
+    return all_jobs
+
+
+def _add_page_jobs(page: Page, page_num: int, using_auth: bool, seen_urls: set[str],
+                   all_jobs: list[dict[str, str]]) -> bool:
+    raw = _scrape_raw_page(page, page_num, using_auth)
+    if not raw:
+        return False
+    new_jobs = _build_new_jobs(raw, seen_urls)
+    if not new_jobs:
+        print("  [linkedin.ch] No new jobs - stop")
+        return False
+    all_jobs.extend(new_jobs)
+    print(f"  [linkedin.ch] {len(new_jobs)} new (total {len(all_jobs)})")
+    human_delay(2.5, 5.0)
+    return True
+
+
+def _create_auth_context(context: BrowserContext) -> BrowserContext | None:
+    if not has_auth_state("linkedin"):
+        return None
+    try:
+        auth_ctx = context.browser.new_context(
+            storage_state=str(auth_state_path("linkedin")),
+            locale="it-CH", timezone_id="Europe/Zurich",
+        )
+        print("  [linkedin.ch] Using saved authenticated session")
+        return auth_ctx
+    except Exception as exc:
+        print(f"  [linkedin.ch] Saved session unreadable ({exc}) - public mode")
+        return None
+
+
+def _scrape_raw_page(page: Page, page_num: int, using_auth: bool) -> list[dict[str, str]]:
+    if not _open_search_page(page, page_num):
+        return []
+    if _blocked_after_open(page, using_auth):
+        return []
+    _dismiss_sign_in_modal(page)
+    if not _wait_for_cards(page, page_num, using_auth):
+        return []
+    return _extract_raw_jobs(page, page_num)
+
+
+def _open_search_page(page: Page, page_num: int) -> bool:
+    start = page_num * 25
+    print(f"  [linkedin.ch] Page {page_num + 1} (start={start})...")
+    try:
+        page.goto(_search_url(start), wait_until="networkidle", timeout=45000)
+        return True
+    except Exception:
+        return _open_search_page_fallback(page, start)
+
+
+def _search_url(start: int) -> str:
+    return (
+        f"{LIST_URL}?keywords=&location={_SEARCH_LOCATION}"
+        f"&f_TPR=r2592000"
+        f"&start={start}"
+    )
+
+
+def _open_search_page_fallback(page: Page, start: int) -> bool:
+    try:
+        page.goto(_search_url(start), wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(3000)
+        return True
+    except Exception as exc:
+        print(f"  [linkedin.ch] Navigation error: {exc}")
+        return False
+
+
+def _blocked_after_open(page: Page, using_auth: bool) -> bool:
+    if not _is_blocked(page):
+        return False
+    shot = debug_artifacts(page, "linkedin_ch_authwall")
+    run_report.set_status(
+        "linkedin.ch", "requires_manual_login", _authwall_reason(using_auth),
+        final_url=page.url, screenshot=shot)
+    return True
+
+
+def _authwall_reason(using_auth: bool) -> str:
+    if using_auth:
+        return "authwall despite saved session - probably expired: rerun python main.py --auth linkedin"
+    return "authwall - for full access: python main.py --auth linkedin"
+
+
+def _dismiss_sign_in_modal(page: Page) -> None:
+    try:
+        dismiss_btn = page.query_selector(
+            'button[aria-label*="Dismiss"], '
+            'button[aria-label*="Close"], '
+            'button.modal__dismiss'
+        )
+        if dismiss_btn and dismiss_btn.is_visible():
+            dismiss_btn.click()
+            page.wait_for_timeout(500)
+    except Exception:
+        pass
+
+
+def _wait_for_cards(page: Page, page_num: int, using_auth: bool) -> bool:
+    for selector in _card_selectors():
         try:
-            page.close()
+            page.wait_for_selector(selector, timeout=8000)
+            return True
         except Exception:
             pass
-        if auth_ctx:
-            try:
-                auth_ctx.close()
-            except Exception:
-                pass
+    _report_missing_cards(page, page_num, using_auth)
+    return False
+
+
+def _card_selectors() -> tuple[str, str, str]:
+    return ('[class*="base-card"]', 'a[href*="/jobs/view/"]', 'ul.jobs-search__results-list')
+
+
+def _report_missing_cards(page: Page, page_num: int, using_auth: bool) -> None:
+    print(f"  [linkedin.ch] No card found (title={page.title()[:60]!r}) - stop")
+    if page_num != 0:
+        return
+    shot = debug_artifacts(page, "linkedin_ch_nocards")
+    hint = " - authenticated DOM may differ from public DOM" if using_auth else ""
+    run_report.set_status(
+        "linkedin.ch", "selector_broken",
+        f"no card on page 1 (title={page.title()[:50]!r}){hint}",
+        final_url=page.url, screenshot=shot)
+
+
+def _extract_raw_jobs(page: Page, page_num: int) -> list[dict[str, str]]:
+    human_scroll(page)
+    page.wait_for_timeout(1500)
+    raw = page.evaluate(_JS_EXTRACT)
+    if raw:
+        return raw
+    print("  [linkedin.ch] Empty page - stop")
+    if page_num == 0:
+        debug_artifacts(page, "linkedin_ch_empty")
+    return []
+
+
+def _build_new_jobs(raw: list[dict[str, str]], seen_urls: set[str]) -> list[dict[str, str]]:
+    jobs = [_build_job(item, seen_urls) for item in raw]
+    return [job for job in jobs if job is not None]
+
+
+def _build_job(item: dict[str, str], seen_urls: set[str]) -> dict[str, str] | None:
+    job_url = _absolute_job_url(item.get("href", ""))
+    title = item.get("title", "").strip()
+    if not job_url or job_url in seen_urls or not title:
+        return None
+    seen_urls.add(job_url)
+    return _job_from_item(item, title, job_url)
+
+
+def _absolute_job_url(job_url: str) -> str:
+    if job_url.startswith("/"):
+        return BASE_URL + job_url
+    if job_url.startswith("http"):
+        return job_url
+    return ""
+
+
+def _job_from_item(item: dict[str, str], title: str, job_url: str) -> dict[str, str]:
+    return {
+        "title": title,
+        "company": item.get("company", "").strip(),
+        "city": item.get("city", "").strip(),
+        "date": _relative_to_date(item.get("dateRaw", "")),
+        "url": job_url,
+        "category": categorize_job(title),
+        "source": "linkedin.ch",
+    }
+
+
+def _close_resources(page: Page, auth_ctx: BrowserContext | None) -> None:
+    try:
+        page.close()
+    except Exception:
+        pass
+    if auth_ctx:
+        try:
+            auth_ctx.close()
+        except Exception:
+            pass

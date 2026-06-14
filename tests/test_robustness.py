@@ -1,71 +1,56 @@
-"""
-Test dell'infrastruttura di robustezza:
-- classificazione eccezioni → stato
-- rilevamento auth gate / blocco anti-bot
-- chiusura cookie banner con regole per dominio
-- decorator @retry (tentativi, backoff, errori irrecuperabili)
-- RunReport (stati, override, ok_partial, salvataggio JSON)
-
-Eseguire con:  python -m pytest tests/ -v
-"""
+"""Tests for retry, page guard, and run report behavior."""
 
 import json
 import sys
 from pathlib import Path
 
 import pytest
+from pytest import MonkeyPatch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scrapers.site_report import (
-    RunReport, classify_exception, ScrapeError,
-)
-from scrapers.page_guard import detect_auth_gate, detect_block, dismiss_cookies
-from scrapers import retry
 import scrapers as scrapers_mod
 import scrapers.settings as cfg
+from scrapers import retry
+from scrapers.page_guard import detect_auth_gate, detect_block, dismiss_cookies
+from scrapers.site_report import RunReport, ScrapeError, classify_exception
 
-
-# ────────────────────────────────────────────────────────────────
-# Finti oggetti Playwright
-# ────────────────────────────────────────────────────────────────
 
 class FakeElement:
-    def __init__(self, visible=True):
+    def __init__(self, visible: bool = True) -> None:
         self._visible = visible
         self.clicks = 0
 
-    def is_visible(self):
+    def is_visible(self) -> bool:
         return self._visible
 
-    def click(self):
+    def click(self) -> None:
         self.clicks += 1
 
 
 class FakePage:
-    """Page minimale: url, title, selettori esistenti."""
-    def __init__(self, url="https://example.com/", title="Example",
-                 selectors=None):
+    def __init__(
+        self,
+        url: str = "https://example.com/",
+        title: str = "Example",
+        selectors: dict[str, FakeElement] | None = None,
+    ) -> None:
         self.url = url
         self._title = title
-        self.selectors = selectors or {}   # sel → FakeElement
+        self.selectors = selectors or {}
 
-    def title(self):
+    def title(self) -> str:
         return self._title
 
-    def query_selector(self, sel):
-        return self.selectors.get(sel)
+    def query_selector(self, selector: str) -> FakeElement | None:
+        return self.selectors.get(selector)
 
-    def wait_for_timeout(self, ms):
+    def wait_for_timeout(self, milliseconds: int) -> None:
         pass
 
-    def evaluate(self, js):
+    def evaluate(self, script: str) -> int:
         return 0
 
-
-# ────────────────────────────────────────────────────────────────
-# classify_exception
-# ────────────────────────────────────────────────────────────────
 
 class FakeTimeoutError(Exception):
     pass
@@ -75,213 +60,216 @@ class TargetClosedError(Exception):
     pass
 
 
-def test_classify_timeout():
-    status, reason = classify_exception(
-        FakeTimeoutError("Timeout 30000ms exceeded."))
+def test_classify_timeout() -> None:
+    status, reason = classify_exception(FakeTimeoutError("Timeout 30000ms exceeded."))
     assert status == "timeout"
     assert "30000" in reason
 
 
-def test_classify_browser_closed():
+def test_classify_browser_closed() -> None:
     status, _ = classify_exception(
         TargetClosedError("Target page, context or browser has been closed"))
     assert status == "browser_closed"
 
 
-def test_classify_network():
+def test_classify_network() -> None:
     status, _ = classify_exception(
         Exception("Page.goto: net::ERR_ABORTED; maybe frame was detached?"))
     assert status == "network_error"
 
 
-def test_classify_generic():
+def test_classify_generic() -> None:
     status, reason = classify_exception(ValueError("boom"))
     assert status == "error"
     assert "ValueError" in reason
 
 
-# ────────────────────────────────────────────────────────────────
-# detect_auth_gate / detect_block
-# ────────────────────────────────────────────────────────────────
-
-def test_auth_gate_da_url_login():
+def test_auth_gate_from_login_url() -> None:
     page = FakePage(url="https://www.linkedin.com/authwall?x=1")
     assert detect_auth_gate(page) is not None
 
 
-def test_auth_gate_da_titolo_indeed():
-    page = FakePage(url="https://ch.indeed.com/jobs?start=15",
-                    title="Accedi | Account Indeed")
+def test_auth_gate_from_indeed_title() -> None:
+    page = FakePage(
+        url="https://ch.indeed.com/jobs?start=15",
+        title="Accedi | Account Indeed",
+    )
     reason = detect_auth_gate(page)
     assert reason is not None and "title" in reason
 
 
-def test_auth_gate_da_form_password():
+def test_auth_gate_from_password_form() -> None:
     page = FakePage(selectors={'input[type="password"]': FakeElement()})
-    reason = detect_auth_gate(page)
-    assert reason == "visible password form"
+    assert detect_auth_gate(page) == "visible password form"
 
 
-def test_auth_gate_pagina_normale():
-    page = FakePage(url="https://www.jobs.ch/en/vacancies/?term=operaio",
-                    title="Posti vacanti in Ticino")
+def test_auth_gate_normal_page() -> None:
+    page = FakePage(
+        url="https://www.jobs.ch/en/vacancies/?term=operaio",
+        title="Posti vacanti in Ticino",
+    )
     assert detect_auth_gate(page) is None
 
 
-def test_block_captcha():
+def test_block_captcha() -> None:
     page = FakePage(title="Attention Required! | Cloudflare")
     assert detect_block(page) is not None
 
 
-def test_block_pagina_normale():
+def test_block_normal_page() -> None:
     page = FakePage(title="Offerte di lavoro Ticino")
     assert detect_block(page) is None
 
 
-# ────────────────────────────────────────────────────────────────
-# dismiss_cookies
-# ────────────────────────────────────────────────────────────────
-
-def test_cookie_regola_per_dominio():
-    btn = FakeElement()
-    page = FakePage(url="https://www.jobscout24.ch/de/jobs/ticino/",
-                    selectors={'button:has-text("Akzeptieren")': btn})
+def test_cookie_domain_rule() -> None:
+    button = FakeElement()
+    page = FakePage(
+        url="https://www.jobscout24.ch/de/jobs/ticino/",
+        selectors={'button:has-text("Akzeptieren")': button},
+    )
     clicked = dismiss_cookies(page, "jobscout24.ch")
     assert clicked == 'button:has-text("Akzeptieren")'
-    assert btn.clicks == 1
+    assert button.clicks == 1
 
 
-def test_cookie_fallback_generico():
-    btn = FakeElement()
-    page = FakePage(url="https://www.sito-sconosciuto.ch/",
-                    selectors={'button#onetrust-reject-all-handler': btn})
-    clicked = dismiss_cookies(page, "sito-sconosciuto")
+def test_cookie_generic_fallback() -> None:
+    button = FakeElement()
+    page = FakePage(
+        url="https://www.unknown-site.ch/",
+        selectors={'button#onetrust-reject-all-handler': button},
+    )
+    clicked = dismiss_cookies(page, "unknown-site")
     assert clicked == 'button#onetrust-reject-all-handler'
-    assert btn.clicks == 1
+    assert button.clicks == 1
 
 
-def test_cookie_nessun_banner():
+def test_cookie_no_banner() -> None:
     page = FakePage(url="https://www.example.ch/")
     assert dismiss_cookies(page, "example") is None
 
 
-def test_cookie_bottone_invisibile_ignorato():
-    btn = FakeElement(visible=False)
-    page = FakePage(url="https://www.example.ch/",
-                    selectors={'button:has-text("Rifiuta")': btn})
+def test_cookie_hidden_button_is_ignored() -> None:
+    button = FakeElement(visible=False)
+    page = FakePage(
+        url="https://www.example.ch/",
+        selectors={'button:has-text("Rifiuta")': button},
+    )
     assert dismiss_cookies(page, "example") is None
-    assert btn.clicks == 0
+    assert button.clicks == 0
 
-
-# ────────────────────────────────────────────────────────────────
-# @retry
-# ────────────────────────────────────────────────────────────────
 
 @pytest.fixture
-def no_sleep(monkeypatch):
-    sleeps = []
-    monkeypatch.setattr(scrapers_mod.time, "sleep", lambda s: sleeps.append(s))
+def no_sleep(monkeypatch: MonkeyPatch) -> list[float]:
+    sleeps: list[float] = []
+    monkeypatch.setattr(scrapers_mod.time, "sleep", lambda seconds: sleeps.append(seconds))
     return sleeps
 
 
-def test_retry_successo_dopo_un_fallimento(no_sleep, monkeypatch):
+def test_retry_success_after_one_failure(
+    no_sleep: list[float],
+    monkeypatch: MonkeyPatch,
+) -> None:
     monkeypatch.setattr(cfg, "MAX_ATTEMPTS", 2)
-    calls = {"n": 0}
+    calls = {"count": 0}
 
     @retry()
-    def flaky():
-        calls["n"] += 1
-        if calls["n"] == 1:
+    def flaky() -> list[str]:
+        calls["count"] += 1
+        if calls["count"] == 1:
             raise ValueError("flaky")
         return ["job"]
 
     assert flaky() == ["job"]
-    assert calls["n"] == 2
-    assert len(no_sleep) == 1            # un solo backoff
-    assert no_sleep[0] <= 6              # backoff breve
+    assert calls["count"] == 2
+    assert len(no_sleep) == 1
+    assert no_sleep[0] <= 6
 
 
-def test_retry_esaurisce_tentativi(no_sleep, monkeypatch):
+def test_retry_exhausts_attempts(
+    no_sleep: list[float],
+    monkeypatch: MonkeyPatch,
+) -> None:
     monkeypatch.setattr(cfg, "MAX_ATTEMPTS", 2)
-    calls = {"n": 0}
+    calls = {"count": 0}
 
     @retry()
-    def always_fails():
-        calls["n"] += 1
-        raise ValueError("sempre rotto")
+    def always_fails() -> None:
+        calls["count"] += 1
+        raise ValueError("always broken")
 
     with pytest.raises(ScrapeError) as exc:
         always_fails()
-    assert calls["n"] == 2
+    assert calls["count"] == 2
     assert exc.value.status == "error"
     assert exc.value.attempts == 2
 
 
-def test_retry_browser_chiuso_niente_retry(no_sleep, monkeypatch):
+def test_retry_browser_closed_without_retry(
+    no_sleep: list[float],
+    monkeypatch: MonkeyPatch,
+) -> None:
     monkeypatch.setattr(cfg, "MAX_ATTEMPTS", 3)
-    calls = {"n": 0}
+    calls = {"count": 0}
 
     @retry()
-    def closed():
-        calls["n"] += 1
+    def closed() -> None:
+        calls["count"] += 1
         raise TargetClosedError("Target page, context or browser has been closed")
 
     with pytest.raises(ScrapeError) as exc:
         closed()
-    assert calls["n"] == 1               # nessun secondo tentativo
+    assert calls["count"] == 1
     assert exc.value.status == "browser_closed"
-    assert no_sleep == []                # nessuna attesa inutile
+    assert no_sleep == []
 
 
-def test_retry_massimo_tre_tentativi(no_sleep, monkeypatch):
+def test_retry_caps_attempts_at_three(
+    no_sleep: list[float],
+    monkeypatch: MonkeyPatch,
+) -> None:
     monkeypatch.setattr(cfg, "MAX_ATTEMPTS", 3)
-    calls = {"n": 0}
+    calls = {"count": 0}
 
-    @retry(max_attempts=99)              # viene comunque limitato a 3
-    def always_fails():
-        calls["n"] += 1
+    @retry(max_attempts=99)
+    def always_fails() -> None:
+        calls["count"] += 1
         raise ValueError("x")
 
     with pytest.raises(ScrapeError):
         always_fails()
-    assert calls["n"] == 3
+    assert calls["count"] == 3
 
 
-# ────────────────────────────────────────────────────────────────
-# RunReport
-# ────────────────────────────────────────────────────────────────
-
-def test_report_ok_e_empty():
-    rep = RunReport()
-    r1 = rep.finish("a.ch", jobs=10, duration_s=5.0)
-    r2 = rep.finish("b.ch", jobs=0, duration_s=2.0)
-    assert r1.status == "ok"
-    assert r2.status == "empty"
+def test_report_ok_and_empty() -> None:
+    report = RunReport()
+    ok_result = report.finish("a.ch", jobs=10, duration_s=5.0)
+    empty_result = report.finish("b.ch", jobs=0, duration_s=2.0)
+    assert ok_result.status == "ok"
+    assert empty_result.status == "empty"
 
 
-def test_report_override_requires_auth():
-    rep = RunReport()
-    rep.set_status("linkedin.ch", "requires_manual_login", "authwall")
-    r = rep.finish("linkedin.ch", jobs=0, duration_s=3.0)
-    assert r.status == "requires_manual_login"
-    assert "authwall" in r.reason
+def test_report_override_requires_auth() -> None:
+    report = RunReport()
+    report.set_status("linkedin.ch", "requires_manual_login", "authwall")
+    result = report.finish("linkedin.ch", jobs=0, duration_s=3.0)
+    assert result.status == "requires_manual_login"
+    assert "authwall" in result.reason
 
 
-def test_report_ok_partial_con_job_e_gate():
-    """Job raccolti + gate su pagine successive → ok_partial, non requires_auth."""
-    rep = RunReport()
-    rep.set_status("indeed.ch", "requires_auth", "pagina 2: titolo di login")
-    r = rep.finish("indeed.ch", jobs=16, duration_s=8.0)
-    assert r.status == "ok_partial"
-    assert "requires_auth" in r.reason
+def test_report_ok_partial_with_jobs_and_gate() -> None:
+    report = RunReport()
+    report.set_status("indeed.ch", "requires_auth", "page 2: login title")
+    result = report.finish("indeed.ch", jobs=16, duration_s=8.0)
+    assert result.status == "ok_partial"
+    assert "requires_auth" in result.reason
 
 
-def test_report_salvataggio_json(tmp_path):
-    rep = RunReport()
-    rep.finish("a.ch", jobs=3, duration_s=1.0)
-    out = tmp_path / "report.json"
-    rep.save(out)
-    data = json.loads(out.read_text(encoding="utf-8"))
+def test_report_saves_json(tmp_path: Path) -> None:
+    report = RunReport()
+    report.finish("a.ch", jobs=3, duration_s=1.0)
+    output_path = tmp_path / "report.json"
+    report.save(output_path)
+    data = json.loads(output_path.read_text(encoding="utf-8"))
     assert data["sites"][0]["site"] == "a.ch"
     assert data["sites"][0]["status"] == "ok"
     assert "started" in data and "finished" in data

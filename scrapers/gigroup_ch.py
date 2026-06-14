@@ -32,83 +32,103 @@ def _parse_date(raw: str) -> str:
 
 def _extract_jobs_from_page(page: Page) -> list[dict[str, str]]:
     cards = page.query_selector_all(".ggp-job-item")
-    jobs = []
+    jobs: list[dict[str, str]] = []
     for card in cards:
         try:
-            # Title.
-            title_el = card.query_selector("h2.ggp-job-item-title")
-            title = title_el.inner_text().strip() if title_el else ""
-            if not title:
-                continue
-
-            # URL.
-            url_el = card.query_selector("a.ggp-job-item-detail-btn")
-            href = url_el.get_attribute("href") if url_el else ""
-            if href and href.startswith("/"):
-                href = BASE_URL + href
-            if not href:
-                continue
-
-            # Metadata rows are distinguished by Bootstrap icon classes.
-            city = ""
-            date = ""
-            meta_rows = card.query_selector_all(".job-item-meta-row")
-            for row in meta_rows:
-                icon = row.query_selector("span.bi")
-                if not icon:
-                    continue
-                icon_class = icon.get_attribute("class") or ""
-                text_el = row.query_selector("div:last-child span")
-                text = text_el.inner_text().strip() if text_el else ""
-
-                if "bi-geo-alt" in icon_class:
-                    # Site text can contain "City, Province, Canton"; keep the city.
-                    city = text.split(",")[0].strip()
-                elif "bi-calendar2-minus" in icon_class:
-                    date = _parse_date(text)
-
-            jobs.append({
-                "title":    title,
-                "company":  "Gi Group SA",
-                "city":     city,
-                "date":     date,
-                "url":      href,
-                "category": categorize_job(title),
-                "source":   "gigroup.ch",
-            })
-        except Exception as e:
-            print(f"[WARN] gigroup.ch card error: {e}")
+            job = _job_from_card(card)
+            if job:
+                jobs.append(job)
+        except Exception as exc:
+            print(f"[WARN] gigroup.ch card error: {exc}")
             continue
     return jobs
 
 
+def _job_from_card(card: object) -> dict[str, str] | None:
+    title = _card_title(card)
+    url = _card_url(card)
+    if not title or not url:
+        return None
+    city, job_date = _card_location_and_date(card)
+    return {
+        "title": title,
+        "company": "Gi Group SA",
+        "city": city,
+        "date": job_date,
+        "url": url,
+        "category": categorize_job(title),
+        "source": "gigroup.ch",
+    }
+
+
+def _card_title(card: object) -> str:
+    title_el = card.query_selector("h2.ggp-job-item-title")
+    return title_el.inner_text().strip() if title_el else ""
+
+
+def _card_url(card: object) -> str:
+    url_el = card.query_selector("a.ggp-job-item-detail-btn")
+    href = url_el.get_attribute("href") if url_el else ""
+    return BASE_URL + href if href and href.startswith("/") else href
+
+
+def _card_location_and_date(card: object) -> tuple[str, str]:
+    city = ""
+    job_date = ""
+    for row in card.query_selector_all(".job-item-meta-row"):
+        city, job_date = _read_meta_row(row, city, job_date)
+    return city, job_date
+
+
+def _read_meta_row(row: object, city: str, job_date: str) -> tuple[str, str]:
+    icon = row.query_selector("span.bi")
+    if not icon:
+        return city, job_date
+    icon_class = icon.get_attribute("class") or ""
+    text = _meta_text(row)
+    if "bi-geo-alt" in icon_class:
+        return text.split(",")[0].strip(), job_date
+    if "bi-calendar2-minus" in icon_class:
+        return city, _parse_date(text)
+    return city, job_date
+
+
+def _meta_text(row: object) -> str:
+    text_el = row.query_selector("div:last-child span")
+    return text_el.inner_text().strip() if text_el else ""
+
+
 @retry()
 def scrape_gigroup_ch(context: BrowserContext) -> list[dict[str, str]]:
-    all_jobs  = []
-    seen_urls = set()
+    all_jobs: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
     page = new_stealth_page(context)
     try:
         for page_num in range(1, MAX_PAGES + 1):
-            url = LIST_URL.format(page=page_num)
-            print(f"  [gigroup.ch] Page {page_num}")
-
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            dismiss_cookie_dialog(page)
-            page.wait_for_timeout(2000)
-            human_scroll(page)
-
-            jobs = _extract_jobs_from_page(page)
-            if not jobs:
+            if not _add_page_jobs(page, page_num, seen_urls, all_jobs):
                 break
-            new_jobs = [j for j in jobs if j["url"] not in seen_urls]
-            if not new_jobs:
-                break   # Repeated page: real pagination ended.
-            for j in new_jobs:
-                seen_urls.add(j["url"])
-            all_jobs.extend(new_jobs)
-            print(f"  [gigroup.ch] {len(new_jobs)} new (total {len(all_jobs)})")
-            human_delay(2.0, 5.0)
-
         return all_jobs
     finally:
         page.close()
+
+
+def _add_page_jobs(page: Page, page_num: int, seen_urls: set[str],
+                   all_jobs: list[dict[str, str]]) -> bool:
+    _open_page(page, page_num)
+    jobs = _extract_jobs_from_page(page)
+    new_jobs = [job for job in jobs if job["url"] not in seen_urls]
+    if not jobs or not new_jobs:
+        return False
+    seen_urls.update(job["url"] for job in new_jobs)
+    all_jobs.extend(new_jobs)
+    print(f"  [gigroup.ch] {len(new_jobs)} new (total {len(all_jobs)})")
+    human_delay(2.0, 5.0)
+    return True
+
+
+def _open_page(page: Page, page_num: int) -> None:
+    print(f"  [gigroup.ch] Page {page_num}")
+    page.goto(LIST_URL.format(page=page_num), wait_until="domcontentloaded", timeout=30000)
+    dismiss_cookie_dialog(page)
+    page.wait_for_timeout(2000)
+    human_scroll(page)

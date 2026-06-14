@@ -15,7 +15,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from playwright.sync_api import BrowserContext, Playwright
+from playwright.sync_api import Browser, BrowserContext, Playwright
 
 from scrapers.settings import AUTH_DIR
 
@@ -54,58 +54,108 @@ def has_auth_state(site: str) -> bool:
 
 def _is_logged_in(context: BrowserContext, cfg: dict[str, str | tuple[str, ...]]) -> bool:
     # Login is confirmed by the session cookie or the current page URL.
+    return _has_success_cookie(context, cfg) or _has_success_url(context, cfg)
+
+
+def _has_success_cookie(context: BrowserContext, cfg: dict[str, str | tuple[str, ...]]) -> bool:
     try:
         cookies = context.cookies()
-        if any(c.get("name") == cfg["success_cookie"] and c.get("value") for c in cookies):
-            return True
+        return any(cookie.get("name") == cfg["success_cookie"] and cookie.get("value") for cookie in cookies)
     except Exception:
-        pass
+        return False
+
+
+def _has_success_url(context: BrowserContext, cfg: dict[str, str | tuple[str, ...]]) -> bool:
     try:
-        for pg in context.pages:
-            url = (pg.url or "").lower()
-            if any(s in url for s in cfg["success_urls"]):
+        success_urls = cfg["success_urls"]
+        for page in context.pages:
+            if any(success_url in (page.url or "").lower() for success_url in success_urls):
                 return True
     except Exception:
-        pass
+        return False
     return False
+
+
+def _site_config(site: str) -> dict[str, str | tuple[str, ...]] | None:
+    cfg = AUTH_SITES.get(site)
+    if not cfg:
+        print(f"[AUTH] Unknown site: {site!r}. Available: {', '.join(AUTH_SITES)}")
+        return None
+    return cfg
+
+
+def _print_auth_instructions(cfg: dict[str, str | tuple[str, ...]]) -> None:
+    print(f"[AUTH] Opening {cfg['login_url']}")
+    print("[AUTH] Log in manually in the browser window.")
+    print(f"[AUTH] You have {WAIT_LOGIN_S // 60} minutes; the session saves after login.")
+
+
+def _start_auth_browser(playwright: Playwright) -> tuple[Browser, BrowserContext]:
+    browser = playwright.chromium.launch(
+        headless=False,
+        args=["--disable-blink-features=AutomationControlled"],
+    )
+    context = browser.new_context(locale="it-CH", timezone_id="Europe/Zurich")
+    return browser, context
+
+
+def _wait_for_login(context: BrowserContext, cfg: dict[str, str | tuple[str, ...]]) -> bool:
+    deadline = time.monotonic() + WAIT_LOGIN_S
+    while time.monotonic() < deadline:
+        if _is_logged_in(context, cfg):
+            return True
+        time.sleep(2)
+        if not context.pages:
+            return False
+    return False
+
+
+def _save_auth_state(context: BrowserContext, state_path: Path) -> None:
+    context.storage_state(path=str(state_path))
+    print(f"[AUTH] Login detected - session saved in {state_path}")
+
+
+def _close_browser(browser: Browser) -> None:
+    try:
+        browser.close()
+    except Exception:
+        pass
 
 
 def run_auth_flow(playwright: Playwright, site: str) -> bool:
     # Open a visible browser for manual login and save storage state.
     # Return True when the session was saved successfully.
-    cfg = AUTH_SITES.get(site)
+    cfg = _site_config(site)
     if not cfg:
-        print(f"[AUTH] Unknown site: {site!r}. Available: {', '.join(AUTH_SITES)}")
         return False
 
     AUTH_DIR.mkdir(exist_ok=True)
     state_path = auth_state_path(site)
+    _print_auth_instructions(cfg)
+    return _run_manual_login(playwright, cfg, state_path)
 
-    print(f"[AUTH] Opening {cfg['login_url']}")
-    print("[AUTH] Log in manually in the browser window.")
-    print(f"[AUTH] You have {WAIT_LOGIN_S // 60} minutes; the session saves after login.")
 
-    browser = playwright.chromium.launch(headless=False,
-                                         args=["--disable-blink-features=AutomationControlled"])
-    context = browser.new_context(locale="it-CH", timezone_id="Europe/Zurich")
+def _run_manual_login(
+    playwright: Playwright,
+    cfg: dict[str, str | tuple[str, ...]],
+    state_path: Path,
+) -> bool:
+    browser, context = _start_auth_browser(playwright)
     page = context.new_page()
     try:
         page.goto(cfg["login_url"], wait_until="domcontentloaded", timeout=60_000)
-
-        deadline = time.monotonic() + WAIT_LOGIN_S
-        while time.monotonic() < deadline:
-            if _is_logged_in(context, cfg):
-                context.storage_state(path=str(state_path))
-                print(f"[AUTH] Login detected - session saved in {state_path}")
-                return True
-            time.sleep(2)
-            if not context.pages:
-                break   # The user manually closed the browser.
-
-        print("[AUTH] Login was not detected before timeout. Session NOT saved.")
-        return False
+        return _save_detected_login(context, cfg, state_path)
     finally:
-        try:
-            browser.close()
-        except Exception:
-            pass
+        _close_browser(browser)
+
+
+def _save_detected_login(
+    context: BrowserContext,
+    cfg: dict[str, str | tuple[str, ...]],
+    state_path: Path,
+) -> bool:
+    if _wait_for_login(context, cfg):
+        _save_auth_state(context, state_path)
+        return True
+    print("[AUTH] Login was not detected before timeout. Session NOT saved.")
+    return False

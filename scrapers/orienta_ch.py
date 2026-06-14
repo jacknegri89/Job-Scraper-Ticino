@@ -29,71 +29,104 @@ def _parse_date(raw: str) -> str:
 
 
 def _extract_jobs(page: Page) -> list[dict[str, str]]:
-    jobs = []
+    jobs: list[dict[str, str]] = []
     for article in page.query_selector_all("article"):
-        link_el = article.query_selector("a[href*='/offerta-di-lavoro/']")
-        if not link_el:
-            continue
-        href = link_el.get_attribute("href") or ""
-        url = (BASE_URL + href) if href.startswith("/") else href
-        h2 = link_el.query_selector("h2")
-        title = (h2.inner_text() if h2 else link_el.inner_text()).strip()
-        if not title:
-            continue
-
-        # Site labels "Data" and "Sede" appear as separate rows before values.
-        lines = [l.strip() for l in article.inner_text().splitlines() if l.strip()]
-        city = date = ""
-        for i, line in enumerate(lines):
-            if line == "Sede" and i + 1 < len(lines):
-                parts = lines[i + 1].split(",")
-                # Live value format is "Svizzera, Ticino, Chiasso"; city is last.
-                city = parts[-1].strip()
-            elif line == "Data" and i + 1 < len(lines):
-                date = _parse_date(lines[i + 1])
-
-        jobs.append({
-            "title":    title,
-            "company":  "Orienta SA",
-            "city":     city,
-            "date":     date,
-            "url":      url,
-            "category": categorize_job(title),
-            "source":   "orienta.ch",
-        })
+        job = _job_from_article(article)
+        if job:
+            jobs.append(job)
     return jobs
+
+
+def _job_from_article(article: object) -> dict[str, str] | None:
+    link_el = article.query_selector("a[href*='/offerta-di-lavoro/']")
+    if not link_el:
+        return None
+    title = _title_from_link(link_el)
+    if not title:
+        return None
+    city, job_date = _city_and_date(article)
+    return _job_payload(link_el, title, city, job_date)
+
+
+def _job_payload(link_el: object, title: str, city: str, job_date: str) -> dict[str, str]:
+    return {
+        "title": title,
+        "company": "Orienta SA",
+        "city": city,
+        "date": job_date,
+        "url": _absolute_url(link_el.get_attribute("href") or ""),
+        "category": categorize_job(title),
+        "source": "orienta.ch",
+    }
+
+
+def _title_from_link(link_el: object) -> str:
+    heading = link_el.query_selector("h2")
+    return (heading.inner_text() if heading else link_el.inner_text()).strip()
+
+
+def _absolute_url(href: str) -> str:
+    return BASE_URL + href if href.startswith("/") else href
+
+
+def _city_and_date(article: object) -> tuple[str, str]:
+    city = ""
+    job_date = ""
+    lines = [line.strip() for line in article.inner_text().splitlines() if line.strip()]
+    for index, line in enumerate(lines):
+        city, job_date = _read_label_value(lines, index, line, city, job_date)
+    return city, job_date
+
+
+def _read_label_value(
+    lines: list[str],
+    index: int,
+    line: str,
+    city: str,
+    job_date: str,
+) -> tuple[str, str]:
+    if index + 1 >= len(lines):
+        return city, job_date
+    if line == "Sede":
+        return lines[index + 1].split(",")[-1].strip(), job_date
+    if line == "Data":
+        return city, _parse_date(lines[index + 1])
+    return city, job_date
 
 
 @retry()
 def scrape_orienta_ch(context: BrowserContext) -> list[dict[str, str]]:
-    all_jobs  = []
-    seen_urls = set()
+    all_jobs: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
     page = new_stealth_page(context)
     try:
         for page_num in range(1, MAX_PAGES + 1):
-            url = f"{LIST_URL}?page={page_num}"
-            print(f"  [orienta.ch] Page {page_num}...")
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
-
-            if page_num == 1:
-                dismiss_cookie_dialog(page)
-                page.wait_for_timeout(1500)
-
-            human_scroll(page)
-            page.wait_for_timeout(1000)
-
-            jobs = _extract_jobs(page)
-            if not jobs:
+            if not _add_page_jobs(page, page_num, seen_urls, all_jobs):
                 break
-            new_jobs = [j for j in jobs if j["url"] not in seen_urls]
-            if not new_jobs:
-                break   # Repeated page: real pagination ended.
-            for j in new_jobs:
-                seen_urls.add(j["url"])
-            all_jobs.extend(new_jobs)
-            print(f"  [orienta.ch] {len(new_jobs)} new (total {len(all_jobs)})")
-            human_delay(2.0, 4.0)
-
         return all_jobs
     finally:
         page.close()
+
+
+def _add_page_jobs(page: Page, page_num: int, seen_urls: set[str],
+                   all_jobs: list[dict[str, str]]) -> bool:
+    _open_page(page, page_num)
+    jobs = _extract_jobs(page)
+    new_jobs = [job for job in jobs if job["url"] not in seen_urls]
+    if not jobs or not new_jobs:
+        return False
+    seen_urls.update(job["url"] for job in new_jobs)
+    all_jobs.extend(new_jobs)
+    print(f"  [orienta.ch] {len(new_jobs)} new (total {len(all_jobs)})")
+    human_delay(2.0, 4.0)
+    return True
+
+
+def _open_page(page: Page, page_num: int) -> None:
+    print(f"  [orienta.ch] Page {page_num}...")
+    page.goto(f"{LIST_URL}?page={page_num}", wait_until="domcontentloaded", timeout=30000)
+    if page_num == 1:
+        dismiss_cookie_dialog(page)
+        page.wait_for_timeout(1500)
+    human_scroll(page)
+    page.wait_for_timeout(1000)

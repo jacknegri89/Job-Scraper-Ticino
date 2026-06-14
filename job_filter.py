@@ -165,12 +165,7 @@ def _is_italian_portal(url: str) -> bool:
     return urlparse(url).netloc.endswith(".it")
 
 
-def _add_unique_job(
-    job: dict,
-    seen_urls: set[str],
-    seen_content: set[str],
-    deduped_jobs: list[dict],
-) -> None:
+def _add_unique_job(job: dict, seen_urls: set[str], seen_content: set[str], deduped_jobs: list[dict]) -> None:
     job_url = job.get("url", "")
     if not job_url:
         return

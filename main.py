@@ -13,7 +13,7 @@ from typing import Any
 
 from playwright.sync_api import sync_playwright
 
-from ai_analyzer import analyze_jobs
+from ai_analyzer import AI_DESCRIPTION, AI_GROSS_SALARY, AI_REASON, AI_SUITABLE, analyze_jobs, normalize_ai_fields
 from dashboard_builder import generate_html
 from job_filter import filter_jobs, is_valid_job, normalize_url
 from scrapers import SESSION_FILE, create_browser_context, fetch_description, save_session
@@ -113,23 +113,20 @@ def _estimate_eta(done: int, total: int, step_times: list[float]) -> str:
     return f"~{_format_seconds(average * (total - done))}"
 
 
-def _print_progress(
-    done: int,
-    total: int,
-    elapsed: float,
-    step_times: list[float],
-    phase: str = "Sites",
-    label: str = "",
-) -> None:
+def _print_progress(done: int, total: int, elapsed: float, step_times: list[float], phase: str = "Sites", label: str = "") -> None:
+    print(f"\n{'-' * 64}")
+    print(_progress_message(done, total, elapsed, step_times, phase, label))
+    print(f"{'-' * 64}\n")
+
+
+def _progress_message(done: int, total: int, elapsed: float, step_times: list[float], phase: str, label: str) -> str:
     percent = done / total if total else 0
     label_text = f"  >> {label}" if label else ""
-    print(f"\n{'-' * 64}")
-    print(
+    return (
         f"  {phase}: [{_progress_bar(done, total)}] {int(percent * 100):3d}% "
         f"({done}/{total})  {_format_seconds(elapsed)} elapsed  "
         f"ETA {_estimate_eta(done, total, step_times)}{label_text}"
     )
-    print(f"{'-' * 64}\n")
 
 
 def _context_alive(context: Any) -> bool:
@@ -156,6 +153,7 @@ def _close_quietly(obj: Any) -> None:
 
 
 def _save_cache(jobs: list[dict]) -> None:
+    jobs = [normalize_ai_fields(job) for job in jobs]
     CACHE_FILE.write_text(json.dumps(jobs, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[CACHE] Saved {len(jobs)} jobs to {CACHE_FILE}")
 
@@ -164,7 +162,7 @@ def _load_cache() -> list[dict]:
     if not CACHE_FILE.exists():
         print("[ERROR] No jobs_cache.json found. Run: python main.py")
         sys.exit(1)
-    jobs = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+    jobs = [normalize_ai_fields(job) for job in json.loads(CACHE_FILE.read_text(encoding="utf-8"))]
     saved_at = datetime.fromtimestamp(CACHE_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
     print(f"[CACHE] Loaded {len(jobs)} jobs from {CACHE_FILE} saved at {saved_at}")
     return jobs
@@ -182,7 +180,7 @@ def _merge_with_cache(new_jobs: list[dict], scanned_sources: set[str]) -> list[d
 
 def _read_cache_or_empty() -> list[dict]:
     try:
-        return json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+        return [normalize_ai_fields(job) for job in json.loads(CACHE_FILE.read_text(encoding="utf-8"))]
     except Exception:
         return []
 
@@ -210,16 +208,17 @@ def _reuse_one_job(job: dict, old_job: dict) -> int:
     if old_job.get("description") and not job.get("description"):
         job["description"] = old_job["description"]
         job["email"] = old_job.get("email", "")
-    if old_job.get("llm_adatto") is not None:
+    old_job = normalize_ai_fields(old_job)
+    if old_job.get(AI_SUITABLE) is not None:
         _copy_ai_fields(job, old_job)
     return 1
 
 
 def _copy_ai_fields(job: dict, old_job: dict) -> None:
-    job["llm_adatto"] = old_job["llm_adatto"]
-    job["llm_motivo"] = old_job.get("llm_motivo", "")
-    job["llm_descrizione"] = old_job.get("llm_descrizione", "")
-    job["llm_stipendio_lordo"] = old_job.get("llm_stipendio_lordo")
+    job[AI_SUITABLE] = old_job[AI_SUITABLE]
+    job[AI_REASON] = old_job.get(AI_REASON, "")
+    job[AI_DESCRIPTION] = old_job.get(AI_DESCRIPTION, "")
+    job[AI_GROSS_SALARY] = old_job.get(AI_GROSS_SALARY)
 
 
 def _select_scrapers(only: str) -> list[ScraperEntry]:
@@ -270,7 +269,7 @@ def _load_frontaliereticino_count() -> int:
 
 
 def _probe_check_selector(page: Any, site: str, ready_selector: str, started_at: float) -> None:
-    from scrapers.report import debug_artifacts
+    from scrapers.site_report import debug_artifacts
 
     try:
         page.wait_for_selector(ready_selector, timeout=10_000, state="attached")
@@ -285,13 +284,7 @@ def _probe_check_selector(page: Any, site: str, ready_selector: str, started_at:
         run_report.finish(site, 0, time.perf_counter() - started_at)
 
 
-def _probe_browser_site(
-    context: Any,
-    site: str,
-    url: str,
-    ready_selector: str,
-    started_at: float,
-) -> None:
+def _probe_browser_site(context: Any, site: str, url: str, ready_selector: str, started_at: float) -> None:
     from scrapers import new_stealth_page
 
     print(f"  [{site}] {url[:70]}...")
@@ -323,7 +316,7 @@ def _handle_probe_result(page: Any, site: str, ready_selector: str, started_at: 
 
 
 def _set_probe_status(page: Any, site: str, status: str, reason: str, started_at: float) -> None:
-    from scrapers.report import debug_artifacts
+    from scrapers.site_report import debug_artifacts
 
     screenshot = debug_artifacts(page, f"probe_{site.replace('.', '_')}")
     run_report.set_status(site, status, reason, final_url=page.url, screenshot=screenshot)
@@ -413,14 +406,7 @@ def _download_description_batch(context: Any, jobs_to_download: list[dict], tota
                     time.perf_counter() - started_at, step_times, phase="Descriptions")
 
 
-def _download_one_description(
-    context: Any,
-    job: dict,
-    index: int,
-    jobs_to_download: list[dict],
-    started_at: float,
-    step_times: list[float],
-) -> None:
+def _download_one_description(context: Any, job: dict, index: int, jobs_to_download: list[dict], started_at: float, step_times: list[float]) -> None:
     _print_progress(index, len(jobs_to_download), time.perf_counter() - started_at,
                     step_times, phase="Descriptions", label=job.get("title", "")[:40])
     step_started_at = time.perf_counter()
@@ -435,25 +421,40 @@ def _download_one_description(
 
 def _run_scrape(only: str = "", scan_only: bool = False) -> list[dict]:
     selected = _select_scrapers(only)
+    valid_jobs, completed = _collect_valid_jobs(selected, scan_only)
+    return _finish_scrape_run(valid_jobs, selected, only, completed)
+
+
+def _collect_valid_jobs(selected: list[ScraperEntry], scan_only: bool) -> tuple[list[dict], bool]:
+    with sync_playwright() as playwright:
+        return _collect_with_browser(playwright, selected, scan_only)
+
+
+def _collect_with_browser(playwright: Any, selected: list[ScraperEntry], scan_only: bool) -> tuple[list[dict], bool]:
     raw_jobs: list[dict] = []
     valid_jobs: list[dict] = []
-    completed = False
-    with sync_playwright() as playwright:
-        browser, context = create_browser_context(playwright)
-        try:
-            raw_jobs, browser, context = _scrape_selected_sites(playwright, browser, context, selected)
-            valid_jobs = _prepare_valid_jobs(raw_jobs, context, scan_only)
-            completed = True
-        except KeyboardInterrupt:
-            print("\n[STOP] Interrupted. Saving what was collected.")
-            valid_jobs = valid_jobs or filter_jobs(raw_jobs)
-        except Exception as exc:
-            print(f"[CRITICAL ERROR] {exc}")
-            valid_jobs = valid_jobs or filter_jobs(raw_jobs)
-        finally:
-            save_session(context)
-            _close_quietly(browser)
-    return _finish_scrape_run(valid_jobs, selected, only, completed)
+    browser, context = create_browser_context(playwright)
+    try:
+        raw_jobs, browser, context = _scrape_selected_sites(playwright, browser, context, selected)
+        valid_jobs = _prepare_valid_jobs(raw_jobs, context, scan_only)
+        return valid_jobs, True
+    except KeyboardInterrupt:
+        return _interrupted_jobs(raw_jobs, valid_jobs), False
+    except Exception as exc:
+        return _critical_error_jobs(exc, raw_jobs, valid_jobs), False
+    finally:
+        save_session(context)
+        _close_quietly(browser)
+
+
+def _interrupted_jobs(raw_jobs: list[dict], valid_jobs: list[dict]) -> list[dict]:
+    print("\n[STOP] Interrupted. Saving what was collected.")
+    return valid_jobs or filter_jobs(raw_jobs)
+
+
+def _critical_error_jobs(exc: Exception, raw_jobs: list[dict], valid_jobs: list[dict]) -> list[dict]:
+    print(f"[CRITICAL ERROR] {exc}")
+    return valid_jobs or filter_jobs(raw_jobs)
 
 
 def _scrape_selected_sites(
@@ -478,16 +479,7 @@ def _ensure_context_alive(playwright: Any, browser: Any, context: Any) -> tuple[
     return _revive_context(playwright, browser, context)
 
 
-def _scrape_site_with_progress(
-    scraper: Callable[[Any], list[dict]],
-    site: str,
-    name: str,
-    index: int,
-    selected: list[ScraperEntry],
-    started_at: float,
-    step_times: list[float],
-    context: Any,
-) -> list[dict]:
+def _scrape_site_with_progress(scraper: Callable[[Any], list[dict]], site: str, name: str, index: int, selected: list[ScraperEntry], started_at: float, step_times: list[float], context: Any) -> list[dict]:
     _print_progress(index, len(selected), time.perf_counter() - started_at, step_times, label=name)
     print(f"=== {name} ===")
     step_started_at = time.perf_counter()
@@ -533,6 +525,12 @@ def _save_completed_or_partial(valid_jobs: list[dict], completed: bool) -> None:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Ticino job scraper")
+    _add_scan_args(parser)
+    _add_runtime_args(parser)
+    return parser.parse_args()
+
+
+def _add_scan_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--reanalyze", action="store_true",
                         help="rerun AI analysis from cache without scraping")
     parser.add_argument("--scan-only", action="store_true",
@@ -541,13 +539,15 @@ def _parse_args() -> argparse.Namespace:
                         help="probe each site without a full scrape")
     parser.add_argument("--only", default="",
                         help="limit to matching sites, for example --only indeed,linkedin")
+
+
+def _add_runtime_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--headless", action="store_true",
                         help="hide the browser window")
     parser.add_argument("--timeout", type=int, default=0, metavar="MS",
                         help=f"navigation timeout in ms, default {config.PAGE_TIMEOUT_MS}")
     parser.add_argument("--auth", default="", metavar="SITE",
                         help="manual login and saved session, for example --auth linkedin")
-    return parser.parse_args()
 
 
 def _apply_cli_overrides(args: argparse.Namespace) -> None:
@@ -589,7 +589,7 @@ def _finalize_jobs(valid_jobs: list[dict], started_at: datetime) -> None:
     analyzed_jobs = analyze_jobs(valid_jobs)
     if analyzed_jobs:
         _save_cache(analyzed_jobs)
-    if analyzed_jobs and not any(job.get("llm_adatto") is not None for job in analyzed_jobs):
+    if analyzed_jobs and not any(job.get(AI_SUITABLE) is not None for job in analyzed_jobs):
         print("[HINT] To rerun only AI analysis: python main.py --reanalyze")
     generate_html(analyzed_jobs)
     _open_dashboard(started_at)

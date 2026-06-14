@@ -10,7 +10,7 @@ Live structure:
 - Company:  always "Randstad SA"
 """
 
-from playwright.sync_api import BrowserContext
+from playwright.sync_api import BrowserContext, Page
 
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, click_load_more, retry
 from job_filter import categorize_job
@@ -63,53 +63,65 @@ _JS_EXTRACT = """
 
 @retry()
 def scrape_randstad_ch(context: BrowserContext) -> list[dict[str, str]]:
-    all_jobs = []
     page = new_stealth_page(context)
     try:
-        print("  [randstad.ch] Loading Ticino jobs...")
-        page.goto(LIST_URL, wait_until="domcontentloaded", timeout=30000)
-        dismiss_cookie_dialog(page)
-        page.wait_for_timeout(2000)
-
-        human_scroll(page)
-        page.wait_for_timeout(1500)
-
-        # OneTrust can appear late and intercept load-more clicks, so run a
-        # second dismissal pass right before clicking.
-        dismiss_cookie_dialog(page)
-
-        _COUNT_JS = (
-            "Array.from(document.querySelectorAll('a[href*=\"/it/lavoro/\"]'))"
-            ".filter(a => /[a-f0-9]{8}-[a-f0-9]{4}/.test(a.getAttribute('href') || '')).length"
-        )
-        total = click_load_more(
-            page,
-            btn_texts=["Visualizza altri", "Mostra altri", "Carica altri"],
-            count_js=_COUNT_JS,
-        )
-        print(f"  [randstad.ch] {total} job links in the DOM after load-more")
-
-        jobs_raw = page.evaluate(_JS_EXTRACT)
-
-        for job in jobs_raw:
-            title = job.get("title", "").strip()
-            city  = job.get("city",  "").strip()
-            url   = job.get("url",   "").strip()
-            if not title or not url:
-                continue
-            all_jobs.append({
-                "title":    title,
-                "company":  "Randstad SA",
-                "city":     city,
-                "date":     job.get("date", ""),
-                "url":      url,
-                "category": categorize_job(title),
-                "source":   "randstad.ch",
-            })
-
-        print(f"  [randstad.ch] {len(all_jobs)} jobs found")
+        all_jobs = _scrape_jobs(page)
     finally:
         page.close()
-
     human_delay(2.0, 4.0)
     return all_jobs
+
+
+def _scrape_jobs(page: Page) -> list[dict[str, str]]:
+    _open_list_page(page)
+    _load_all_cards(page)
+    jobs = _build_jobs(page.evaluate(_JS_EXTRACT))
+    print(f"  [randstad.ch] {len(jobs)} jobs found")
+    return jobs
+
+
+def _open_list_page(page: Page) -> None:
+    print("  [randstad.ch] Loading Ticino jobs...")
+    page.goto(LIST_URL, wait_until="domcontentloaded", timeout=30000)
+    dismiss_cookie_dialog(page)
+    page.wait_for_timeout(2000)
+    human_scroll(page)
+    page.wait_for_timeout(1500)
+
+
+def _load_all_cards(page: Page) -> None:
+    dismiss_cookie_dialog(page)
+    total = click_load_more(
+        page,
+        btn_texts=["Visualizza altri", "Mostra altri", "Carica altri"],
+        count_js=_count_js(),
+    )
+    print(f"  [randstad.ch] {total} job links in the DOM after load-more")
+
+
+def _count_js() -> str:
+    return (
+        "Array.from(document.querySelectorAll('a[href*=\"/it/lavoro/\"]'))"
+        ".filter(a => /[a-f0-9]{8}-[a-f0-9]{4}/.test(a.getAttribute('href') || '')).length"
+    )
+
+
+def _build_jobs(raw_jobs: list[dict[str, str]]) -> list[dict[str, str]]:
+    jobs = [_build_job(job) for job in raw_jobs]
+    return [job for job in jobs if job is not None]
+
+
+def _build_job(raw_job: dict[str, str]) -> dict[str, str] | None:
+    title = raw_job.get("title", "").strip()
+    url = raw_job.get("url", "").strip()
+    if not title or not url:
+        return None
+    return {
+        "title": title,
+        "company": "Randstad SA",
+        "city": raw_job.get("city", "").strip(),
+        "date": raw_job.get("date", ""),
+        "url": url,
+        "category": categorize_job(title),
+        "source": "randstad.ch",
+    }
