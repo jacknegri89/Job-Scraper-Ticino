@@ -1,5 +1,7 @@
 # Job Scraper Ticino
 
+[![CI](https://github.com/jacknegri89/Job-Scraper-Ticino/actions/workflows/ci.yml/badge.svg)](https://github.com/jacknegri89/Job-Scraper-Ticino/actions/workflows/ci.yml)
+
 Job Scraper Ticino collects public job postings from Swiss portals, filters them
 for the Mendrisio district, enriches them with optional AI analysis, and writes
 an interactive `index.html` dashboard.
