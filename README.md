@@ -15,7 +15,7 @@ Use Python 3.10 or newer.
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\activate        # Windows; on macOS/Linux: source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python -m playwright install chromium
@@ -180,7 +180,7 @@ python -m pytest tests/ -v
 The test suite covers filtering, city and URL normalization, dashboard HTML,
 distance calculation, salary calculation, retries, and page guard behavior.
 
-## Privacy And GitHub Hygiene
+## Privacy
 
 Do not commit `user_config.py`; it contains personal coordinates and the AI
 profile. Use `user_config.example.py` as the shared template.
@@ -194,13 +194,14 @@ files. Review `jobs_cache.json` locally before sharing any logs or artifacts,
 because AI prompts and scraped descriptions may include personal or copyrighted
 content from job portals.
 
-GitHub contributors are determined from commit metadata. Keep documentation
-focused on setup, usage, and project behavior rather than adding manual
-contributor text.
-
 ## Legal Notes
 
 The scraper reads public pages and does not create fake accounts. For portals
 that require a user session, use the manual `--auth` flow and follow the portal's
 terms. Site structure and access controls can change; check `scan_report.json`
 and `debug/` when a scraper starts returning empty or blocked results.
+
+## License
+
+No open-source license — all rights reserved © 2026 Giacomo Negri.
+You're welcome to browse the code; please ask before reusing it.
