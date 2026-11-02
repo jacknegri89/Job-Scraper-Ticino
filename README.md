@@ -203,5 +203,4 @@ and `debug/` when a scraper starts returning empty or blocked results.
 
 ## License
 
-No open-source license — all rights reserved © 2026 Giacomo Negri.
-You're welcome to browse the code; please ask before reusing it.
+Released under the [MIT License](./LICENSE) © 2026 Giacomo Negri.
