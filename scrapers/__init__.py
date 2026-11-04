@@ -5,6 +5,7 @@ import functools
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn, ParamSpec, TypeVar
+from urllib.parse import urlsplit
 
 from playwright.sync_api import Browser, BrowserContext, ElementHandle, Page, Playwright
 
@@ -47,6 +48,13 @@ VIEWPORTS = [
 
 PROFILE_DIR = Path(__file__).parent.parent / "profile"
 SESSION_FILE = PROFILE_DIR / "state.json"
+
+# Description pages may only contact the known job portals, never arbitrary hosts.
+DESCRIPTION_HOSTS = frozenset({
+    "www.jobs.ch", "www.carriera.ch", "ch.gigroup.com", "www.randstad.ch",
+    "www.orienta.ch", "www.jobscout24.ch", "ch.indeed.com", "www.adecco.com",
+    "www.manpower.ch", "frontaliereticino.ch", "www.linkedin.com",
+})
 
 
 def create_browser_context(playwright: Playwright, headless: bool | None = None) -> tuple[Browser, BrowserContext]:
@@ -227,10 +235,13 @@ def fetch_description(context: BrowserContext, url: str, max_chars: int = 3000) 
     """Open a job page and return its cleaned description plus any email."""
     empty = {"description": "", "email": ""}
     if not _valid_description_url(url):
+        print("  [DESC] Skipping URL outside supported portals")
         return empty
+    description_context = None
     page = None
     try:
-        page = _open_description_page(context, url)
+        description_context = context.browser.new_context(java_script_enabled=False, service_workers="block")
+        page = _open_description_page(description_context, url)
         clean_text = _clean_description_text(_description_text(page))
         return _description_result(clean_text, max_chars)
     except Exception as e:
@@ -238,14 +249,34 @@ def fetch_description(context: BrowserContext, url: str, max_chars: int = 3000) 
         return empty
     finally:
         _close_page(page)
+        if description_context:
+            description_context.close()
 
 
 def _valid_description_url(url: str) -> bool:
-    return bool(url and url.startswith(("https://", "http://")))
+    try:
+        parsed = urlsplit(url)
+        return (
+            parsed.scheme == "https"
+            and parsed.hostname in DESCRIPTION_HOSTS
+            and parsed.port in (None, 443)
+            and parsed.username is None
+            and parsed.password is None
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def _filter_description_request(route: Any) -> None:
+    if _valid_description_url(route.request.url):
+        route.continue_()
+    else:
+        route.abort()
 
 
 def _open_description_page(context: BrowserContext, url: str) -> Page:
     page = new_stealth_page(context)
+    page.route("**/*", _filter_description_request)
     page.goto(url, wait_until="domcontentloaded", timeout=20000)
     dismiss_cookie_dialog(page)
     page.wait_for_timeout(1500)

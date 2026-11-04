@@ -18,7 +18,7 @@ echo Script: !SCRIPT_PATH!
 echo.
 
 schtasks /create /tn "JobScraperFrontaliero" ^
-  /tr "\"!PYTHON_PATH!\" \"!SCRIPT_PATH!\"" ^
+  /tr "\"!PYTHON_PATH!\" \"!SCRIPT_PATH!\" --project-dir" ^
   /sc daily /st 08:00 ^
   /f
 

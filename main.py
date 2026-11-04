@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import sys
 import time
 import webbrowser
@@ -242,8 +243,6 @@ def _exit_unknown_site(only: str) -> None:
 
 
 def _probe_frontaliereticino(started_at: float) -> None:
-    import urllib.request
-
     site = "frontaliereticino.ch"
     try:
         count = _load_frontaliereticino_count()
@@ -549,6 +548,8 @@ def _add_scan_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_runtime_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--project-dir", action="store_true",
+                        help="write relative outputs in the project directory")
     parser.add_argument("--headless", action="store_true",
                         help="hide the browser window")
     parser.add_argument("--timeout", type=int, default=0, metavar="MS",
@@ -611,6 +612,8 @@ def _open_dashboard(started_at: datetime) -> None:
 def main() -> None:
     _configure_console()
     args = _parse_args()
+    if args.project_dir:
+        os.chdir(Path(__file__).resolve().parent)
     started_at = datetime.now()
     _apply_cli_overrides(args)
     if args.auth:

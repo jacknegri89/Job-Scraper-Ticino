@@ -90,7 +90,7 @@ class RunReport:
                   f"  {r.duration_s:>6.0f}s  {note}")
         print("=" * 78)
         n_ok = sum(1 for r in self.results if r.status in ("ok", "ok_partial"))
-        print(f"  {n_ok}/{len(self.results)} sites with jobs collected\n")
+        print(f"  {n_ok}/{len(self.results)} sites reported ok or partial\n")
 
 
 def _calculated_status(jobs: int, status: str) -> str:

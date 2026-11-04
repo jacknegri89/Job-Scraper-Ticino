@@ -133,11 +133,9 @@ def _open_city_page(page: Page, city_name: str, page_num: int, url: str) -> bool
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
         return True
     except Exception as exc:
-        if _page_closed(exc):
-            print(f"  [manpower.ch] {city_name}: page closed during navigation - stop")
-            return False
-        page.wait_for_timeout(3000)
-        return True
+        print(f"  [manpower.ch] {city_name}: navigation failed ({type(exc).__name__})")
+        run_report.set_status("manpower.ch", "ok_partial", f"{city_name}: navigation failed")
+        return False
 
 
 def _handle_first_page_cookie(page: Page, page_num: int) -> None:
@@ -224,7 +222,7 @@ def _build_job(
 
 def _job_from_item(item: dict[str, str], title: str, city_name: str, job_url: str) -> dict[str, str]:
     raw_date = item.get("dateStr", "")
-    job_date = _parse_date(raw_date) if raw_date else date.today().isoformat()
+    job_date = _parse_date(raw_date) if raw_date else ""
     return {
         "title": title,
         "company": "Manpower",

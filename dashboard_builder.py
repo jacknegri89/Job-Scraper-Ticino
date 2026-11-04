@@ -338,13 +338,14 @@ _TEMPLATE = """<!DOCTYPE html>
   --line2:  #39414D;
   --text:   #E6EDF3;
   --muted:  #9BA4AF;
-  --faint:  #6A7380;
+  --faint:  #9BA4AF;
   --green:  #3FB950;
   --green-dim: rgba(63,185,80,.12);
   --red:    #F47067;
   --font:   'Inter', -apple-system, 'Segoe UI', sans-serif;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
+:focus-visible { outline: 3px solid #79B8FF; outline-offset: 2px; }
 body {
   background: var(--bg); color: var(--text);
   font-family: var(--font); font-size: 14px; line-height: 1.5;
@@ -389,7 +390,6 @@ h1 .dot { color: var(--green); }
   background: var(--panel); color: var(--text);
   border: 1px solid var(--line); border-radius: 8px;
   padding: 9px 14px; font-size: 13.5px; font-family: var(--font);
-  outline: none;
 }
 #search:focus { border-color: var(--green); }
 #search::placeholder { color: var(--faint); }
@@ -397,7 +397,7 @@ h1 .dot { color: var(--green); }
   background: var(--panel); color: var(--muted);
   border: 1px solid var(--line); border-radius: 8px;
   padding: 9px 10px; font-size: 13px; font-family: var(--font);
-  outline: none; cursor: pointer;
+  cursor: pointer;
 }
 .count { color: var(--faint); font-size: 13px; white-space: nowrap; }
 .count b { color: var(--green); }
@@ -416,7 +416,7 @@ h1 .dot { color: var(--green); }
 .chip-dot { width: 7px; height: 7px; border-radius: 50%;
             background: var(--chip-accent, var(--faint)); }
 .chip-ai { border-color: rgba(63,185,80,.4); color: var(--green); }
-.chip-ai.active { background: var(--green); color: #fff; border-color: var(--green); }
+.chip-ai.active { background: var(--green); color: var(--bg); border-color: var(--green); }
 
 /* Card grid */
 main { max-width: 1280px; margin: 0 auto; padding: 24px 24px 80px; }
@@ -431,8 +431,7 @@ main { max-width: 1280px; margin: 0 auto; padding: 24px 24px 80px; }
   transition: border-color .15s, transform .15s;
 }
 .card:hover { border-color: var(--line2); transform: translateY(-2px); }
-.card[data-ai="not_match"] { opacity: .45; }
-.card[data-ai="not_match"]:hover { opacity: 1; }
+.card[data-ai="not_match"] { border-color: var(--line2); }
 
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .card-cat {
@@ -484,7 +483,7 @@ main { max-width: 1280px; margin: 0 auto; padding: 24px 24px 80px; }
 .sal-num { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
 .sal-row.deduct .sal-num { color: var(--red); }
 .sal-net { display: flex; justify-content: space-between; align-items: center;
-           background: var(--green); color: #fff; font-size: 13px; font-weight: 700;
+           background: var(--green); color: var(--bg); font-size: 13px; font-weight: 700;
            padding: 8px 12px; border-radius: 8px; margin-top: 4px; }
 .sal-note { font-size: 10px; color: var(--faint); }
 
@@ -497,7 +496,7 @@ main { max-width: 1280px; margin: 0 auto; padding: 24px 24px 80px; }
 
 .apply-btn {
   display: flex; justify-content: center; align-items: center; gap: 8px;
-  background: var(--green); color: #fff;
+  background: var(--green); color: var(--bg);
   font-size: 13.5px; font-weight: 700;
   padding: 11px; border-radius: 8px; text-decoration: none;
 }
@@ -544,8 +543,8 @@ footer {
 <div class="toolbar">
   <div class="toolbar-in">
     <div class="row1">
-      <input id="search" type="text" placeholder="Search title, company, or city...">
-      <select id="sort">
+      <input id="search" type="text" aria-label="Search jobs" placeholder="Search title, company, or city...">
+      <select id="sort" aria-label="Sort jobs">
         <option value="date">Newest</option>
         <option value="km">Nearest</option>
       </select>

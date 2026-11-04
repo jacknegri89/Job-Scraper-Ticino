@@ -26,6 +26,7 @@ _LEGACY_AI_FIELDS = {
 _DELAY_BETWEEN_CALLS = 1.5
 _MAX_RETRIES = 4
 _RATE_LIMIT_WAIT = 20
+_API_TIMEOUT_SECONDS = 10.0
 _PROFILE_ATTRS = ("CANDIDATE_PROFILE", "PROFILE")
 _GENERIC_CANDIDATE_PROFILE = (
     "Generic candidate profile. Evaluate job fit from the job posting and any "
@@ -93,7 +94,7 @@ def _create_openai_client() -> Any | None:
     except ImportError:
         print("[LLM] Package 'openai' is not installed; run 'pip install -r requirements.txt' and rerun.")
         return None
-    return OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    return OpenAI(api_key=os.environ["OPENAI_API_KEY"], timeout=_API_TIMEOUT_SECONDS, max_retries=0)
 
 
 def _count_pending_jobs(jobs: list[Job]) -> int:
@@ -149,7 +150,8 @@ def _append_unprocessed_jobs(analyzed_jobs: list[Job], jobs: list[Job]) -> list[
 
 
 def _request_llm_analysis(client: Any, job: Job, job_index: int) -> Job:
-    user_content = _USER_PROMPT_TEMPLATE.replace("{job_text}", _job_text(job))
+    job_text = _job_text(job).replace("<", "\\u003c").replace(">", "\\u003e")
+    user_content = _USER_PROMPT_TEMPLATE.replace("{job_text}", job_text)
     wait = _RATE_LIMIT_WAIT
     for attempt in range(1, _MAX_RETRIES + 1):
         result = _try_llm_request(client, job, job_index, user_content, attempt, wait)

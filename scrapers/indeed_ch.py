@@ -18,7 +18,7 @@ from playwright.sync_api import BrowserContext, Page
 
 from scrapers import new_stealth_page, human_delay, human_scroll, retry
 from scrapers.page_guard import detect_auth_gate, detect_block, dismiss_cookies
-from scrapers.site_report import run_report, debug_artifacts
+from scrapers.site_report import run_report
 from job_filter import categorize_job
 
 BASE_URL = "https://ch.indeed.com"
@@ -135,6 +135,7 @@ def _open_keyword_page_fallback(page: Page, keyword: str) -> bool:
         return True
     except Exception as exc:
         print(f"  [indeed.ch] Navigation failed ({type(exc).__name__}) - skip")
+        run_report.set_status("indeed.ch", "ok_partial", "Search navigation failed")
         return False
 
 
@@ -147,10 +148,16 @@ def _handle_cookie_once(page: Page, cookie_done: list[bool]) -> None:
 
 
 def _blocked_or_gated(page: Page) -> bool:
-    if detect_block(page):
+    block_reason = detect_block(page)
+    if block_reason:
         print("  [indeed.ch] Anti-bot block detected - stop")
+        run_report.set_status("indeed.ch", "blocked", block_reason)
         return True
-    return detect_auth_gate(page) is not None
+    auth_reason = detect_auth_gate(page)
+    if auth_reason:
+        run_report.set_status("indeed.ch", "requires_auth", auth_reason)
+        return True
+    return False
 
 
 def _wait_for_cards(page: Page) -> None:

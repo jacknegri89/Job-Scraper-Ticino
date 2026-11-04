@@ -276,6 +276,7 @@ def _open_search_page_fallback(page: Page, start: int) -> bool:
         return True
     except Exception as exc:
         print(f"  [linkedin.ch] Navigation error: {exc}")
+        run_report.set_status("linkedin.ch", "ok_partial", "Search navigation failed")
         return False
 
 

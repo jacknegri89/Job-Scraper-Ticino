@@ -8,7 +8,6 @@ URL: https://www.adecco.com/it-ch/trovare-lavoro?jobsearch-title=&location=Ticin
 
 import re
 import unicodedata
-from datetime import date
 
 from playwright.sync_api import BrowserContext, Page
 
@@ -134,7 +133,7 @@ def _job_from_item(item: dict[str, str], job_id: str, title: str) -> dict[str, s
         "title": title,
         "company": "Adecco",
         "city": city,
-        "date": raw_date[:10] if raw_date else date.today().isoformat(),
+        "date": raw_date[:10] if raw_date else "",
         "url": _job_url(title, city, state, job_id),
         "category": categorize_job(title),
         "source": "adecco.ch",

@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import scrapers as scrapers_mod
 import scrapers.settings as cfg
 from scrapers import retry
+from scrapers import _filter_description_request, _valid_description_url
 from scrapers.page_guard import detect_auth_gate, detect_block, dismiss_cookies
 from scrapers.site_report import RunReport, ScrapeError, classify_exception
 
@@ -273,3 +274,45 @@ def test_report_saves_json(tmp_path: Path) -> None:
     assert data["sites"][0]["site"] == "a.ch"
     assert data["sites"][0]["status"] == "ok"
     assert "started" in data and "finished" in data
+
+
+@pytest.mark.parametrize("url", [
+    "http://www.jobs.ch/job/1",
+    "https://www.jobs.ch.evil.example/job/1",
+    "https://www.jobs.ch@127.0.0.1/job/1",
+    "https://www.jobs.ch:8443/job/1",
+    "https://127.0.0.1/",
+    "file:///etc/passwd",
+])
+def test_description_rejects_untrusted_urls(url: str) -> None:
+    assert not _valid_description_url(url)
+
+
+def test_description_accepts_known_https_portal() -> None:
+    assert _valid_description_url("https://www.jobs.ch/job/1")
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("https://www.jobs.ch/job/1", "continued"),
+    ("https://127.0.0.1/private", "aborted"),
+    ("https://other.example/redirect", "aborted"),
+])
+def test_description_blocks_untrusted_redirects_and_resources(url: str, expected: str) -> None:
+    class Request:
+        pass
+
+    class Route:
+        def __init__(self) -> None:
+            self.request = Request()
+            self.request.url = url
+            self.result = ""
+
+        def continue_(self) -> None:
+            self.result = "continued"
+
+        def abort(self) -> None:
+            self.result = "aborted"
+
+    route = Route()
+    _filter_description_request(route)
+    assert route.result == expected

@@ -1,6 +1,7 @@
 """Regression tests for partial scans and search completeness."""
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,6 +13,8 @@ from scrapers.indeed_ch import _relative_to_date as indeed_date
 from scrapers.jobscout24_ch import _relative_to_date as jobscout_date
 from scrapers.linkedin_ch import _relative_to_date as linkedin_date
 from scrapers.manpower_ch import _parse_date as manpower_date
+from scrapers.manpower_ch import _job_from_item as manpower_job
+from scrapers.adecco_ch import _job_from_item as adecco_job
 from scrapers.site_report import RunReport
 
 
@@ -107,3 +110,19 @@ def test_unknown_relative_dates_are_not_reported_as_today(parse_date, raw):
 def test_manpower_unknown_date_is_not_invented():
     assert manpower_date("") == ""
     assert manpower_date("99/99/2026") == ""
+
+
+def test_missing_dates_in_source_jobs_remain_empty():
+    assert manpower_job({}, "Worker", "Chiasso", "https://www.manpower.ch/1")["date"] == ""
+    assert adecco_job({}, "123", "Worker")["date"] == ""
+
+
+def test_project_dir_option_selects_project_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    args = SimpleNamespace(project_dir=True, headless=False, timeout=0, auth="")
+    monkeypatch.setattr(main, "_parse_args", lambda: args)
+    monkeypatch.setattr(main, "_run_scan_mode", lambda *_: None)
+
+    main.main()
+
+    assert main.Path.cwd() == main.Path(main.__file__).resolve().parent
