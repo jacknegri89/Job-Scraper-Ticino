@@ -41,6 +41,12 @@ def test_out_of_area_city_is_rejected() -> None:
 
 def test_italian_portal_is_rejected() -> None:
     assert is_valid_job(_job(url="https://www.subito.it/annuncio/5")) is False
+    assert is_valid_job(_job(url="https://www.subito.it:443/annuncio/5")) is False
+
+
+def test_invalid_job_urls_are_rejected() -> None:
+    assert is_valid_job(_job(url="javascript:alert(1)")) is False
+    assert is_valid_job(_job(url="https://user@example.ch/job/1")) is False
 
 
 def test_identical_url_is_deduplicated() -> None:
@@ -53,6 +59,12 @@ def test_same_content_across_portals_is_deduplicated() -> None:
     first = _job(url="https://www.jobs.ch/job/1")
     second = _job(url="https://www.jobscout24.ch/job/9", source="jobscout24.ch")
     assert len(filter_jobs([first, second])) == 1
+
+
+def test_jobs_without_company_are_not_deduplicated_by_title_alone() -> None:
+    first = _job(company="", url="https://www.jobs.ch/job/1")
+    second = _job(company="", url="https://www.jobs.ch/job/2")
+    assert len(filter_jobs([first, second])) == 2
 
 
 def test_agency_jobs_are_not_deduplicated_by_title_only() -> None:

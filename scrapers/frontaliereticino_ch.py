@@ -46,11 +46,7 @@ def scrape_frontaliereticino_ch(context: object) -> list[dict[str, str]]:  # con
 
 
 def _download_index() -> list[dict[str, str]]:
-    try:
-        return _read_index_response()
-    except Exception as exc:
-        print(f"  [frontaliereticino.ch] Download error: {exc}")
-        return []
+    return _read_index_response()
 
 
 def _read_index_response() -> list[dict[str, str]]:

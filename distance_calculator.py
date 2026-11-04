@@ -6,7 +6,9 @@ from job_filter import normalize_city
 
 try:
     from user_config import HOME_CITY, HOME_LAT, HOME_LNG
-except ImportError:
+except ModuleNotFoundError as error:
+    if error.name != "user_config":
+        raise
     HOME_LAT = 45.0
     HOME_LNG = 9.0
     HOME_CITY = "Home"

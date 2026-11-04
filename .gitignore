@@ -221,6 +221,7 @@ __marimo__/
 index.html
 jobs_cache.json
 jobs_cache.partial.json
+.jobs-cache-*.tmp
 .claude/
 .test-deps/
 scan_report.json

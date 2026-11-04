@@ -139,7 +139,18 @@ def normalize_url(url: str) -> str:
 
 def is_valid_job(job: dict) -> bool:
     """Return True when a job is in the supported Swiss border area."""
-    if _is_italian_portal(job.get("url", "")):
+    url = job.get("url", "")
+    if not isinstance(url, str):
+        return False
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            return False
+        if parsed.username is not None or parsed.password is not None:
+            return False
+    except ValueError:
+        return False
+    if _is_italian_portal(url):
         return False
     return normalize_city(job.get("city", "")) in ALLOWED_CITIES
 
@@ -169,7 +180,7 @@ def _has_keyword(title_lower: str, keywords: list[str]) -> bool:
 
 
 def _is_italian_portal(url: str) -> bool:
-    return urlparse(url).netloc.endswith(".it")
+    return (urlparse(url).hostname or "").rstrip(".").lower().endswith(".it")
 
 
 def _add_unique_job(job: dict, seen_urls: set[str], seen_content: set[str], deduped_jobs: list[dict]) -> None:
@@ -189,6 +200,8 @@ def _content_key(job: dict) -> str:
     title_key = _compact(job.get("title", ""))[:40]
     company_key = _compact(job.get("company", ""))[:25]
     city_key = normalize_city(job.get("city", ""))
+    if not company_key:
+        return f"{title_key}|{city_key}|{normalize_url(job.get('url', ''))}"
     if job.get("source") in AGENCY_SOURCES:
         url_tail = _compact(job.get("url", ""))[-18:]
         return f"{title_key}|{company_key}|{city_key}|{url_tail}"

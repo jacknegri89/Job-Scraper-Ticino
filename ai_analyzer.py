@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import math
 import os
 import re
 import time
@@ -250,8 +251,12 @@ def _is_rate_limit(exc: Exception) -> bool:
 def _valid_gross_salary(raw: Any) -> int | None:
     if isinstance(raw, bool):
         return None
-    if isinstance(raw, (int, float)) and raw > 0:
-        return int(raw)
+    if isinstance(raw, (int, float)):
+        try:
+            if math.isfinite(raw) and raw > 0:
+                return int(raw)
+        except OverflowError:
+            return None
     return None
 
 
@@ -259,9 +264,13 @@ def _apply_llm_result(job: Job, result: JsonObject) -> None:
     suitable = result.get("suitable")
     if not isinstance(suitable, bool):
         raise ValueError("AI response must contain a boolean suitable field")
+    reason = result.get("reason")
+    description = result.get("description")
+    if not isinstance(reason, str) or not isinstance(description, str):
+        raise ValueError("AI response must contain text reason and description fields")
     job[AI_SUITABLE] = suitable
-    job[AI_REASON] = str(result.get("reason", ""))[:120]
-    job[AI_DESCRIPTION] = str(result.get("description", ""))[:2000]
+    job[AI_REASON] = reason[:120]
+    job[AI_DESCRIPTION] = description[:2000]
     job[AI_GROSS_SALARY] = _valid_gross_salary(result.get("gross_salary"))
 
 

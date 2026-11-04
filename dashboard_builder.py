@@ -14,6 +14,7 @@ File layout:
 """
 
 import html as html_lib
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -68,8 +69,6 @@ _JUNK = frozenset([
     "dettagli offerta di lavoro", "dettagli dell'annuncio",
     "log in,", "save apply", "per candidarti",
     "mostra offerte simili", "imposta un job alert",
-    "prodotti metallurgici", "elettronica e semiconduttori",
-    "edilizia e costruzioni", "gestione progetti", "electrics",
     "classe e stipendio annuo", "sede di lavoro:", "tipo di lavoro:",
 ])
 
@@ -211,7 +210,7 @@ def _salary_net_row(net_eur: int) -> str:
 
 def _email_block(job: Job) -> str:
     email = str(job.get("email") or "").strip()
-    if not email:
+    if not re.fullmatch(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,10}", email):
         return ""
     escaped_email = _escape_html(email)
     return f'<a class="email-link" href="mailto:{escaped_email}">&#9993; {escaped_email}</a>'
@@ -326,9 +325,6 @@ _TEMPLATE = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ticino Jobs - cross-border dashboard</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23161B22%22/><circle cx=%2232%22 cy=%2232%22 r=%2210%22 fill=%22%233FB950%22/></svg>">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 :root {
   --bg:     #0E1116;
@@ -342,7 +338,7 @@ _TEMPLATE = """<!DOCTYPE html>
   --green:  #3FB950;
   --green-dim: rgba(63,185,80,.12);
   --red:    #F47067;
-  --font:   'Inter', -apple-system, 'Segoe UI', sans-serif;
+  --font:   -apple-system, 'Segoe UI', sans-serif;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :focus-visible { outline: 3px solid #79B8FF; outline-offset: 2px; }
@@ -534,7 +530,7 @@ footer {
   <p class="subtitle">Jobs from __NSOURCES__ Swiss portals, filtered for the
      Mendrisio district. Distances are calculated from __HOME_CITY__ as straight-line estimates.</p>
   <div class="stats">
-    <div class="stat"><b>__COUNT__</b><span>active jobs</span></div>
+    <div class="stat"><b>__COUNT__</b><span>cached jobs</span></div>
     <div class="stat green"><b>__N_MATCHES__</b><span>good matches</span></div>
     <div class="stat"><b>__NSOURCES__</b><span>sources</span></div>
   </div>
@@ -678,7 +674,7 @@ def _source_list(jobs: list[Job]) -> tuple[int, str]:
     """Return the number of sources and a readable source list actually present."""
     present_sources = {str(job.get("source")) for job in jobs if job.get("source")}
     if not present_sources:
-        return len(SOURCE_LABEL), " | ".join(SOURCE_LABEL.values())
+        return 0, "-"
     names = sorted(SOURCE_LABEL.get(source, source) for source in present_sources)
     return len(present_sources), " | ".join(names)
 

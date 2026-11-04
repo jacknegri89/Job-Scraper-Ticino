@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 import time
 import webbrowser
 from collections import Counter
@@ -153,7 +154,18 @@ def _close_quietly(obj: Any) -> None:
 
 def _save_cache(jobs: list[dict]) -> None:
     jobs = [normalize_ai_fields(job) for job in jobs]
-    CACHE_FILE.write_text(json.dumps(jobs, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Replace the cache only after the complete JSON has been written successfully.
+    cache_content = json.dumps(jobs, ensure_ascii=False, indent=2)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=CACHE_FILE.parent,
+                                         prefix=".jobs-cache-", suffix=".tmp", delete=False) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(cache_content)
+        os.replace(temporary_path, CACHE_FILE)
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
     print(f"[CACHE] Saved {len(jobs)} jobs to {CACHE_FILE}")
 
 
@@ -161,7 +173,7 @@ def _load_cache() -> list[dict]:
     if not CACHE_FILE.exists():
         print("[ERROR] No jobs_cache.json found. Run: python main.py")
         sys.exit(1)
-    jobs = [normalize_ai_fields(job) for job in json.loads(CACHE_FILE.read_text(encoding="utf-8"))]
+    jobs = _read_cache_or_empty()
     saved_at = datetime.fromtimestamp(CACHE_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
     print(f"[CACHE] Loaded {len(jobs)} jobs from {CACHE_FILE} saved at {saved_at}")
     return jobs
@@ -226,6 +238,12 @@ def _select_scrapers(only: str) -> list[ScraperEntry]:
     if not only:
         return SCRAPERS
     wanted = [item.strip().lower() for item in only.split(",") if item.strip()]
+    if not wanted:
+        _exit_unknown_site(only)
+    available_sites = [site for _, site, _ in SCRAPERS]
+    for requested_site in wanted:
+        if not any(requested_site in site for site in available_sites):
+            _exit_unknown_site(only)
     selected = [entry for entry in SCRAPERS if _matches_site(entry[1], wanted)]
     if not selected:
         _exit_unknown_site(only)
@@ -434,8 +452,9 @@ def _collect_with_browser(playwright: Any, selected: list[ScraperEntry], scan_on
     valid_jobs: list[dict] = []
     browser, context = create_browser_context(playwright)
     try:
-        raw_jobs, browser, context = _scrape_selected_sites(playwright, browser, context, selected)
-        valid_jobs = _prepare_valid_jobs(raw_jobs, context, scan_only)
+        browser, context = _scrape_selected_sites(playwright, browser, context, selected, raw_jobs)
+        valid_jobs = filter_jobs(raw_jobs)
+        _prepare_valid_jobs(raw_jobs, valid_jobs, context, scan_only)
         return valid_jobs, True
     except KeyboardInterrupt:
         return _interrupted_jobs(raw_jobs, valid_jobs), False
@@ -461,15 +480,15 @@ def _scrape_selected_sites(
     browser: Any,
     context: Any,
     selected: list[ScraperEntry],
-) -> tuple[list[dict], Any, Any]:
-    raw_jobs: list[dict] = []
+    raw_jobs: list[dict],
+) -> tuple[Any, Any]:
     started_at = time.perf_counter()
     step_times: list[float] = []
     for index, (name, site, scraper) in enumerate(selected):
         browser, context = _ensure_context_alive(playwright, browser, context)
         raw_jobs.extend(_scrape_site_with_progress(scraper, site, name, index, selected, started_at, step_times, context))
     _print_progress(len(selected), len(selected), time.perf_counter() - started_at, step_times)
-    return raw_jobs, browser, context
+    return browser, context
 
 
 def _ensure_context_alive(playwright: Any, browser: Any, context: Any) -> tuple[Any, Any]:
@@ -488,15 +507,13 @@ def _scrape_site_with_progress(scraper: Callable[[Any], list[dict]], site: str, 
     return jobs
 
 
-def _prepare_valid_jobs(raw_jobs: list[dict], context: Any, scan_only: bool) -> list[dict]:
-    valid_jobs = filter_jobs(raw_jobs)
+def _prepare_valid_jobs(raw_jobs: list[dict], valid_jobs: list[dict], context: Any, scan_only: bool) -> None:
     _print_filter_summary(raw_jobs, valid_jobs)
     reused_count = _reuse_previous_data(valid_jobs)
     if reused_count:
         print(f"[CACHE] Reused paid description/AI data for {reused_count} jobs.")
     if not scan_only:
         _download_descriptions(context, valid_jobs)
-    return valid_jobs
 
 
 def _finish_scrape_run(
@@ -508,11 +525,12 @@ def _finish_scrape_run(
 ) -> list[dict] | None:
     run_report.print_table()
     run_report.save()
+    if not completed:
+        if not scan_only:
+            _save_completed_or_partial(valid_jobs, False)
+        return None
     if scan_only:
         return valid_jobs
-    if not completed:
-        _save_completed_or_partial(valid_jobs, False)
-        return None
     # Preserve old results when a source failed or returned an ambiguous empty result.
     successful_sources = {result.site for result in run_report.results if result.status == "ok"}
     valid_jobs = filter_jobs(_merge_with_cache(valid_jobs, successful_sources))

@@ -66,6 +66,12 @@ def test_card_escapes_html_fields(monkeypatch: MonkeyPatch) -> None:
     assert "&lt;script&gt;" in card
 
 
+def test_business_description_is_not_removed_as_navigation(monkeypatch: MonkeyPatch) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+    card = dashboard.build_card(_job(description="Gestione progetti di elettronica e semiconduttori."))
+    assert "Gestione progetti di elettronica" in card
+
+
 def test_card_rejects_non_http_url(monkeypatch: MonkeyPatch) -> None:
     dashboard = load_dashboard_module(monkeypatch)
 
@@ -73,6 +79,12 @@ def test_card_rejects_non_http_url(monkeypatch: MonkeyPatch) -> None:
 
     assert 'href="#"' in card
     assert "javascript:alert" not in card
+
+
+def test_card_rejects_email_header_injection(monkeypatch: MonkeyPatch) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+    card = dashboard.build_card(_job(email="person@example.com?bcc=other@example.com"))
+    assert "mailto:" not in card
 
 
 def test_generate_html_writes_complete_page(
@@ -106,3 +118,5 @@ def test_generate_html_with_no_jobs_shows_empty_state(
     page = output_path.read_text(encoding="utf-8")
 
     assert 'class="empty show"' in page
+    assert "<b>0</b><span>sources</span>" in page
+    assert "fonts.googleapis.com" not in page
