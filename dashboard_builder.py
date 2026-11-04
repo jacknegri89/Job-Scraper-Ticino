@@ -193,7 +193,7 @@ def _salary_panel(net_salary: dict[str, int]) -> str:
         _salary_row("Ticino withholding tax", f'{net_salary["withholding_chf"]:,} CHF', deduct=True),
         _salary_row("Additional Italian income tax", f'{net_salary["extra_italian_tax_eur"]:,} &euro;', deduct=True),
         _salary_net_row(net_salary["net_eur"]),
-        '<p class="sal-note">Estimate &plusmn;15% &middot; cross-border regime after 2023-07-17</p>',
+        '<p class="sal-note">Indicative estimate &middot; cross-border regime after 2023-07-17</p>',
         "</div>",
     ]
     return "".join(rows)

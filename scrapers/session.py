@@ -1,7 +1,7 @@
 # Authenticated sessions: NEVER automatic logins.
 #
 # Flow:
-#   1. python scraper.py --auth linkedin
+#   1. python main.py --auth linkedin
 #   2. a visible browser opens on the login page
 #   3. the user logs in MANUALLY, including any 2FA
 #   4. the script detects a successful login and saves storage state in profile/

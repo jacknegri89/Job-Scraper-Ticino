@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/jacknegri89/Job-Scraper-Ticino/actions/workflows/ci.yml/badge.svg)](https://github.com/jacknegri89/Job-Scraper-Ticino/actions/workflows/ci.yml)
 
-Job Scraper Ticino collects public job postings from Swiss portals, filters them
-for the Mendrisio district, enriches them with optional AI analysis, and writes
+Job Scraper Ticino collects job postings from Swiss portals, filters them
+for eight supported municipalities in the Mendrisio district, enriches them with optional AI analysis, and writes
 an interactive `index.html` dashboard.
 
 The project is designed for local use. Generated outputs, browser sessions, and
@@ -28,13 +28,23 @@ sync when runtime or test dependencies change.
 
 Create your local config from the template:
 
-```bash
+```powershell
 copy user_config.example.py user_config.py
 ```
+
+On macOS/Linux, use `cp user_config.example.py user_config.py` instead. Run
+commands from the project directory: the cache and dashboard use the current
+working directory.
+The optional `setup_task_scheduler.bat` creates a Windows scheduled task but
+does not set its working directory. Check the task configuration before using
+it, or generated files may be written outside the project directory.
 
 Edit `user_config.py` with your home coordinates, dashboard home-city label, and
 AI profile. `user_config.py` is local and ignored by Git; commit changes to
 `user_config.example.py` only when the shared template needs to change.
+The example coordinates are placeholders: replace them before using distance
+estimates. If `user_config.py` is absent, fallback coordinates and a generic AI
+profile are used instead of your personal settings.
 
 Run a full scan:
 
@@ -91,7 +101,9 @@ later runs.
 ```bash
 python main.py --reanalyze
 ```
-Reuse `jobs_cache.json` and rerun only the AI analysis.
+Reuse `jobs_cache.json`, analyze jobs that do not yet have an AI result, and
+regenerate the dashboard without scraping. Existing AI results are reused, even
+if the candidate profile has changed; this option does not force reanalysis.
 
 ## Architecture
 
@@ -120,6 +132,7 @@ tests/
   test_distance.py       Distance tests
   test_tax_calculator.py Salary/tax tests
   test_robustness.py     Retry and guard behavior tests
+  test_scan_regressions.py Cache, pagination, and AI result regression tests
 ```
 
 A full run follows this flow:
@@ -146,6 +159,12 @@ Local personal configuration lives in `user_config.py`, copied from
 | `SCRAPER_HEADLESS` | environment | `1` runs the browser headlessly |
 | `SCRAPER_TIMEOUT_MS` | environment | Default navigation timeout |
 | `SCRAPER_ATTEMPTS` | environment | Retry attempts per scraper, capped by code |
+
+The location filter currently accepts Chiasso, Mendrisio, Stabio, Balerna,
+Coldrerio, Morbio Inferiore, Novazzano, and Riva San Vitale. Search terms for
+jobs.ch and the municipality list are defined in `job_filter.py`; editing them
+requires changing code. The other portals use their own search strategies.
+Distances are straight-line estimates, not travel distances or times.
 
 Generated files are intentionally ignored:
 
@@ -184,7 +203,16 @@ python -m pytest tests/ -v
 ```
 
 The test suite covers filtering, city and URL normalization, dashboard HTML,
-distance calculation, salary calculation, retries, and page guard behavior.
+distance calculation, salary calculation, retries, page guard behavior, cache
+preservation, jobs.ch pagination, and AI result validation. Tests do not verify
+that live portals currently work or measure scraping performance.
+
+## Salary estimates
+
+When AI analysis supplies an estimated gross salary, the dashboard calculates
+an indicative net amount using the assumptions in `salary_calculator.py`.
+Neither figure is a verified salary offer or a personalized tax calculation.
+Check the original posting and applicable rules before making decisions.
 
 ## Privacy
 

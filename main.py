@@ -539,7 +539,7 @@ def _parse_args() -> argparse.Namespace:
 
 def _add_scan_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--reanalyze", action="store_true",
-                        help="rerun AI analysis from cache without scraping")
+                        help="analyze pending cached jobs without scraping")
     parser.add_argument("--scan-only", action="store_true",
                         help="scan sites and write the report, but skip descriptions, AI, and HTML")
     parser.add_argument("--dry-run", action="store_true",
@@ -597,7 +597,7 @@ def _finalize_jobs(valid_jobs: list[dict], started_at: datetime) -> None:
     if analyzed_jobs:
         _save_cache(analyzed_jobs)
     if analyzed_jobs and not any(job.get(AI_SUITABLE) is not None for job in analyzed_jobs):
-        print("[HINT] To rerun only AI analysis: python main.py --reanalyze")
+        print("[HINT] To analyze missing cached jobs: python main.py --reanalyze")
     generate_html(analyzed_jobs)
     _open_dashboard(started_at)
 

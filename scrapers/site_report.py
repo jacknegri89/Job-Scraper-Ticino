@@ -5,7 +5,7 @@
 #   ok_partial            jobs collected, but part of the site is inaccessible
 #   empty                 site reachable but no jobs collected
 #   requires_auth         content behind login
-#   requires_manual_login manual session needed: python scraper.py --auth <site>
+#   requires_manual_login manual session needed: python main.py --auth <site>
 #   blocked               captcha / anti-bot
 #   timeout               page did not respond in time
 #   network_error         DNS / connection / abort
