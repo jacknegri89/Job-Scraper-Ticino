@@ -58,7 +58,7 @@ configured, save the cache, generate `index.html`, and open it.
 python main.py --scan-only
 ```
 Scan sites and write `scan_report.json`, without fetching descriptions, AI
-analysis, or dashboard generation.
+analysis, dashboard generation, or changing the jobs cache.
 
 ```bash
 python main.py --dry-run
@@ -153,9 +153,15 @@ Generated files are intentionally ignored:
 |------|----------|
 | `index.html` | Generated dashboard |
 | `jobs_cache.json` | Cached jobs, descriptions, emails, and AI results |
+| `jobs_cache.partial.json` | Results recovered from an interrupted scan |
 | `scan_report.json` | Per-site scan status |
 | `debug/` | Debug screenshots and page snapshots |
 | `profile/` | Saved browser auth sessions and cookies |
+
+Results from sources that fail, are blocked, return an ambiguous empty result,
+or complete only partially are preserved from the previous cache. These entries
+may no longer be current; check the per-source status in `scan_report.json`.
+An interrupted scan does not replace the main cache.
 
 ## Testing
 

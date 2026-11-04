@@ -220,6 +220,9 @@ __marimo__/
 # Generated scraper output
 index.html
 jobs_cache.json
+jobs_cache.partial.json
+.claude/
+.test-deps/
 scan_report.json
 debug/
 

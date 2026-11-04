@@ -251,7 +251,10 @@ def _valid_gross_salary(raw: Any) -> int | None:
 
 
 def _apply_llm_result(job: Job, result: JsonObject) -> None:
-    job[AI_SUITABLE] = bool(result.get("suitable", True))
+    suitable = result.get("suitable")
+    if not isinstance(suitable, bool):
+        raise ValueError("AI response must contain a boolean suitable field")
+    job[AI_SUITABLE] = suitable
     job[AI_REASON] = str(result.get("reason", ""))[:120]
     job[AI_DESCRIPTION] = str(result.get("description", ""))[:2000]
     job[AI_GROSS_SALARY] = _valid_gross_salary(result.get("gross_salary"))

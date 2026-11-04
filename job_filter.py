@@ -31,6 +31,13 @@ SEARCH_TERMS = [
     "logistica",
     "elettricista",
     "produzione",
+    "manutentore",
+    "montatore",
+    "aiuto cucina",
+    "help desk",
+    "supporto IT",
+    "lagerist",
+    "elektriker",
 ]
 
 KEYWORDS = {

@@ -175,7 +175,7 @@ def _merge_with_cache(new_jobs: list[dict], scanned_sources: set[str]) -> list[d
     kept_jobs = [job for job in old_jobs if job.get("source") not in scanned_sources]
     if kept_jobs:
         print(f"[CACHE] Preserved {len(kept_jobs)} jobs from sources not scanned.")
-    return kept_jobs + new_jobs
+    return new_jobs + kept_jobs
 
 
 def _read_cache_or_empty() -> list[dict]:
@@ -419,10 +419,10 @@ def _download_one_description(context: Any, job: dict, index: int, jobs_to_downl
           f"{email_label} ({_format_seconds(step_times[-1])})")
 
 
-def _run_scrape(only: str = "", scan_only: bool = False) -> list[dict]:
+def _run_scrape(only: str = "", scan_only: bool = False) -> list[dict] | None:
     selected = _select_scrapers(only)
     valid_jobs, completed = _collect_valid_jobs(selected, scan_only)
-    return _finish_scrape_run(valid_jobs, selected, only, completed)
+    return _finish_scrape_run(valid_jobs, selected, only, completed, scan_only)
 
 
 def _collect_valid_jobs(selected: list[ScraperEntry], scan_only: bool) -> tuple[list[dict], bool]:
@@ -505,12 +505,19 @@ def _finish_scrape_run(
     selected: list[ScraperEntry],
     only: str,
     completed: bool,
-) -> list[dict]:
+    scan_only: bool = False,
+) -> list[dict] | None:
     run_report.print_table()
     run_report.save()
-    if only:
-        valid_jobs = _merge_with_cache(valid_jobs, {site for _, site, _ in selected})
-    _save_completed_or_partial(valid_jobs, completed)
+    if scan_only:
+        return valid_jobs
+    if not completed:
+        _save_completed_or_partial(valid_jobs, False)
+        return None
+    # Preserve old results when a source failed or returned an ambiguous empty result.
+    successful_sources = {result.site for result in run_report.results if result.status == "ok"}
+    valid_jobs = filter_jobs(_merge_with_cache(valid_jobs, successful_sources))
+    _save_completed_or_partial(valid_jobs, True)
     return valid_jobs
 
 
