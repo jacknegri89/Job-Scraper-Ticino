@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Configura Job Scraper Ticino</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; color: #182632; background: #f3f6f5; }
+    * { box-sizing: border-box; }
+    body { margin: 0; line-height: 1.5; }
+    header, main { max-width: 1050px; margin: auto; padding: 24px; }
+    header { padding-bottom: 4px; }
+    h1 { margin: 0 0 6px; font-size: clamp(1.6rem, 4vw, 2.4rem); }
+    h2 { margin: 0 0 8px; font-size: 1.15rem; }
+    p { margin: 6px 0 14px; }
+    .intro { color: #41545e; }
+    form { display: grid; gap: 16px; }
+    section { background: white; border: 1px solid #ccd7d4; border-radius: 12px; padding: 20px; }
+    fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+    legend { font-weight: 700; margin-bottom: 8px; }
+    .choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+    .choice { display: flex; align-items: center; gap: 8px; padding: 8px; background: #f3f7f5; border-radius: 6px; }
+    label:not(.choice) { display: block; font-weight: 600; margin: 12px 0 5px; }
+    input[type=text], input[type=number], textarea { width: 100%; max-width: 100%; padding: 10px; border: 1px solid #879a95; border-radius: 6px; font: inherit; color: inherit; background: white; }
+    textarea { min-height: 90px; resize: vertical; }
+    .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 12px; }
+    .hint { color: #41545e; font-size: .9rem; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    button { padding: 11px 18px; border: 1px solid #1c5c4f; border-radius: 7px; background: white; color: #17483e; font: inherit; font-weight: 700; cursor: pointer; }
+    button.primary { background: #174f43; color: white; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    :focus-visible { outline: 3px solid #a3480f; outline-offset: 2px; }
+    #message { min-height: 1.5em; font-weight: 600; }
+    .error { color: #9c2424; }
+    .status { border-left: 4px solid #2b7766; padding-left: 14px; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Job Scraper Ticino</h1>
+  <p class="intro">Scegli dove e come cercare. La ricerca si avvia in background e prepara la tua dashboard.</p>
+</header>
+<main>
+  <form id="settings-form">
+    <section>
+      <fieldset><legend>Comuni da includere</legend><p class="hint">Seleziona almeno un comune.</p><div class="choices" id="cities"></div></fieldset>
+    </section>
+    <section>
+      <fieldset><legend>Fonti di annunci</legend><p class="hint">Seleziona almeno una fonte.</p><div class="choices" id="sources"></div></fieldset>
+    </section>
+    <section>
+      <h2>Ricerca su jobs.ch</h2>
+      <label for="terms">Parole di ricerca</label>
+      <textarea id="terms" required maxlength="10000" aria-describedby="terms-hint"></textarea>
+      <p class="hint" id="terms-hint">Una parola o frase per riga. Gli altri portali usano le proprie strategie di ricerca.</p>
+    </section>
+    <section>
+      <h2>Distanza</h2>
+      <label class="choice"><input type="checkbox" id="use-distance"> Calcola la distanza in linea d'aria</label>
+      <div id="distance-fields" class="row">
+        <div><label for="home-city">Località di partenza</label><input id="home-city" type="text" maxlength="100"></div>
+        <div><label for="latitude">Latitudine</label><input id="latitude" type="number" min="-90" max="90" step="any"></div>
+        <div><label for="longitude">Longitudine</label><input id="longitude" type="number" min="-180" max="180" step="any"></div>
+      </div>
+      <p class="hint">Inserisci le coordinate in gradi decimali, ad esempio 45.83 e 9.03. Non è un percorso stradale.</p>
+    </section>
+    <section>
+      <h2>Analisi AI facoltativa</h2>
+      <label class="choice"><input type="checkbox" id="ai-enabled"> Valuta gli annunci rispetto al mio profilo</label>
+      <div id="ai-fields"><label for="profile">Profilo professionale</label><textarea id="profile" maxlength="3000"></textarea>
+        <p class="hint">Il profilo e i dati degli annunci vengono inviati a OpenAI. È necessaria la variabile d'ambiente OPENAI_API_KEY: la chiave non viene inserita né salvata qui. I risultati AI già in cache non vengono ricalcolati automaticamente.</p></div>
+    </section>
+    <section>
+      <h2>Opzioni di esecuzione</h2>
+      <div class="row"><div><label for="timeout">Timeout predefinito (millisecondi)</label><input id="timeout" type="number" min="1000" max="120000" step="1" required></div>
+        <div><label for="attempts">Tentativi per fonte</label><input id="attempts" type="number" min="1" max="3" step="1" required></div></div>
+      <p class="hint">La ricerca in background usa il browser senza finestra. Alcune fonti hanno timeout propri.</p>
+    </section>
+    <section class="status">
+      <h2>Stato della ricerca</h2>
+      <p id="status" aria-live="polite">Pronta per iniziare.</p>
+      <p class="hint">Le impostazioni sono salvate solo su questo computer. Al termine si apre la dashboard nel browser.</p>
+      <div class="actions"><button type="submit" class="primary" id="start">Avvia ricerca</button><button type="button" id="save">Salva impostazioni</button><button type="button" id="close">Chiudi pannello</button></div>
+      <p id="message" role="status" aria-live="polite"></p>
+    </section>
+  </form>
+</main>
+<script id="panel-data" type="application/json">__PANEL_DATA__</script>
+<script>
+"use strict";
+const data = JSON.parse(document.getElementById("panel-data").textContent);
+const form = document.getElementById("settings-form");
+const message = document.getElementById("message");
+const startButton = document.getElementById("start");
+const statusText = document.getElementById("status");
+let statusTimer;
+const byId = id => document.getElementById(id);
+
+function addChoices(containerId, values, selected) {
+  const container = byId(containerId);
+  for (const value of values) {
+    const label = document.createElement("label");
+    label.className = "choice";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = value;
+    input.checked = selected.includes(value);
+    label.append(input, document.createTextNode(value));
+    container.appendChild(label);
+  }
+}
+
+function toggleFields() {
+  byId("distance-fields").hidden = !byId("use-distance").checked;
+  byId("latitude").required = byId("use-distance").checked;
+  byId("longitude").required = byId("use-distance").checked;
+  byId("ai-fields").hidden = !byId("ai-enabled").checked;
+}
+
+function selected(containerId) {
+  return Array.from(byId(containerId).querySelectorAll("input:checked"), input => input.value);
+}
+
+function collectSettings() {
+  const cities = selected("cities");
+  const sources = selected("sources");
+  const terms = byId("terms").value.split(/[\n,]+/).map(value => value.trim()).filter(Boolean);
+  if (!cities.length || !sources.length || !terms.length) throw new Error("Seleziona almeno un comune, una fonte e un termine di ricerca.");
+  const useDistance = byId("use-distance").checked;
+  return {
+    cities, sources, search_terms: terms,
+    home_city: useDistance ? byId("home-city").value.trim() : "",
+    home_lat: useDistance ? Number(byId("latitude").value) : null,
+    home_lng: useDistance ? Number(byId("longitude").value) : null,
+    ai_enabled: byId("ai-enabled").checked,
+    candidate_profile: byId("profile").value.trim(),
+    headless: true,
+    timeout_ms: Number(byId("timeout").value), attempts: Number(byId("attempts").value)
+  };
+}
+
+async function send(action) {
+  message.textContent = "";
+  message.className = "";
+  try {
+    if (!form.reportValidity()) return;
+    const settings = collectSettings();
+    const response = await fetch(`/${data.token}/${action}`, {
+      method: "POST", headers: {"Content-Type": "application/json", "X-CSRF-Token": data.token},
+      body: JSON.stringify(settings)
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Operazione non riuscita.");
+    message.textContent = action === "start" ? "Ricerca avviata in background." : "Impostazioni salvate.";
+    await refreshStatus();
+  } catch (error) {
+    message.className = "error";
+    message.textContent = error.message || "Operazione non riuscita.";
+  }
+}
+
+async function refreshStatus() {
+  try {
+    const response = await fetch(`/${data.token}/status`, {cache: "no-store"});
+    const result = await response.json();
+    const labels = {idle: "Pronta per iniziare.", running: "Ricerca in corso in background…", complete: "Ricerca completata. La dashboard è pronta.", error: "La ricerca non è riuscita. Controlla scraper.log nella cartella del progetto."};
+    statusText.textContent = labels[result.status] || "Stato non disponibile.";
+    startButton.disabled = result.status === "running";
+  } catch (_) {
+    statusText.textContent = "Pannello non raggiungibile.";
+  }
+}
+
+addChoices("cities", data.cities, data.settings.cities);
+addChoices("sources", data.sources, data.settings.sources);
+byId("terms").value = data.settings.search_terms.join("\n");
+byId("use-distance").checked = data.settings.home_lat !== null;
+byId("home-city").value = data.settings.home_city;
+byId("latitude").value = data.settings.home_lat ?? "";
+byId("longitude").value = data.settings.home_lng ?? "";
+byId("ai-enabled").checked = data.settings.ai_enabled;
+byId("profile").value = data.settings.candidate_profile;
+byId("timeout").value = data.settings.timeout_ms;
+byId("attempts").value = data.settings.attempts;
+byId("use-distance").addEventListener("change", toggleFields);
+byId("ai-enabled").addEventListener("change", toggleFields);
+form.addEventListener("submit", event => { event.preventDefault(); send("start"); });
+byId("save").addEventListener("click", () => send("save"));
+byId("close").addEventListener("click", async () => {
+  try {
+    await fetch(`/${data.token}/close`, {method: "POST", headers: {"Content-Type": "application/json", "X-CSRF-Token": data.token}, body: "{}"});
+    clearInterval(statusTimer);
+    statusText.textContent = "Pannello chiuso. Un'eventuale ricerca continua in background.";
+    form.querySelectorAll("button").forEach(button => { button.disabled = true; });
+  } catch (_) {
+    message.textContent = "Impossibile chiudere il pannello.";
+  }
+});
+toggleFields();
+refreshStatus();
+statusTimer = setInterval(refreshStatus, 2000);
+</script>
+</body>
+</html>

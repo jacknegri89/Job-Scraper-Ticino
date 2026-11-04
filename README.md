@@ -24,7 +24,11 @@ Chromium usa il proprio sandbox. Su Linux il sistema deve supportarlo: se il bro
 
 ## Configurazione e avvio
 
-Copia `user_config.example.py` in `user_config.py`: usa `copy user_config.example.py user_config.py` in PowerShell o `cp user_config.example.py user_config.py` su macOS/Linux. Inserisci coordinate, nome della località di partenza e profilo per l'AI. Le coordinate di esempio sono segnaposto. Senza configurazione personale vengono usate coordinate predefinite e un profilo AI generico.
+Su Windows fai doppio clic su `Avvia.bat`: si apre nel browser predefinito un pannello locale con comuni, fonti, termini di ricerca per jobs.ch, distanza, analisi AI, timeout e tentativi. Su altri sistemi, o da terminale, usa `python main.py --panel`. Il pannello funziona solo su questo computer, tramite `127.0.0.1` e una porta temporanea.
+
+Scegli le opzioni e premi **Salva impostazioni** oppure **Avvia ricerca**. La ricerca parte in background con il browser di raccolta nascosto; il pannello mostra lo stato e al termine il programma apre la dashboard. Il pulsante **Chiudi pannello** termina il pannello, senza interrompere una ricerca già avviata. Le scelte sono salvate nel file locale `user_settings.json`, escluso da Git. Per usare l'AI, imposta `OPENAI_API_KEY` nell'ambiente prima di aprire il pannello: la chiave non viene inserita né salvata nel pannello. Se attivi l'AI, il profilo viene inviato al modello insieme ai dati dell'annuncio.
+
+Se possiedi già `user_config.py`, il pannello propone le coordinate e il profilo esistenti senza modificarlo. Finché non salvi la nuova configurazione, restano valide le impostazioni precedenti. Gli avvii automatici in background usano le impostazioni salvate; se non esistono usano le impostazioni precedenti.
 
 Esegui dalla cartella del progetto:
 
@@ -32,9 +36,9 @@ Esegui dalla cartella del progetto:
 python main.py
 ```
 
-Il programma raccoglie gli annunci, recupera le descrizioni consentite, riutilizza i dati in cache, esegue l'eventuale analisi AI e genera `index.html`. La dashboard include ricerca, filtri, distanze indicative, stime salariali e collegamenti agli annunci. È progettata per l'uso locale: la pubblicazione online richiede una verifica separata di dati personali, privacy e contenuti dei portali.
+Il comando apre il pannello. Il programma raccoglie gli annunci, recupera le descrizioni consentite, riutilizza i dati in cache, esegue l'eventuale analisi AI e genera `index.html`. La dashboard include ricerca, filtri, distanze indicative, stime salariali e collegamenti agli annunci. È progettata per l'uso locale: la pubblicazione online richiede una verifica separata di dati personali, privacy e contenuti dei portali.
 
-Lo script facoltativo `setup_task_scheduler.bat` configura su Windows un'attività giornaliera alle 08:00. Usa `--project-dir` per salvare i file nella cartella del progetto. Per aggiornare un'attività creata con una versione precedente, esegui nuovamente lo script.
+Lo script facoltativo `setup_task_scheduler.bat` configura su Windows un'attività giornaliera alle 08:00. Usa `--background --headless --project-dir` per eseguire la ricerca senza pannello e salvare i file nella cartella del progetto. Per aggiornare un'attività creata con una versione precedente, esegui nuovamente lo script.
 
 ## Comandi
 
@@ -44,6 +48,8 @@ Lo script facoltativo `setup_task_scheduler.bat` configura su Windows un'attivit
 | `python main.py --dry-run` | Verifica rapidamente accesso, blocchi e selettori delle fonti. |
 | `python main.py --only jobs.ch,indeed` | Limita la ricerca alle fonti indicate, mantenendo quando possibile i risultati delle altre fonti nella cache. |
 | `python main.py --headless` | Avvia Chromium senza finestra visibile. |
+| `python main.py --panel` o `--configure` | Apre il pannello di configurazione nel browser. |
+| `python main.py --background --headless --project-dir` | Esegue la ricerca senza aprire il pannello. |
 | `python main.py --project-dir` | Salva i file relativi nella cartella del progetto anche se avviato altrove. |
 | `python main.py --timeout 45000` | Imposta il timeout di navigazione predefinito, in millisecondi. |
 | `python main.py --auth linkedin` | Apre il login manuale LinkedIn e salva la sessione. |
@@ -55,15 +61,14 @@ Lo script facoltativo `setup_task_scheduler.bat` configura su Windows un'attivit
 
 | Impostazione | Dove | Funzione |
 |---|---|---|
-| `HOME_LAT`, `HOME_LNG` | `user_config.py` | Coordinate di partenza per le distanze. |
-| `HOME_CITY` | `user_config.py` | Etichetta della località di partenza. |
-| `CANDIDATE_PROFILE` | `user_config.py` | Profilo inviato al modello per valutare gli annunci. |
+| Comuni, fonti, parole, coordinate, profilo, timeout e tentativi | `user_settings.json` | Scelte locali impostate nel pannello; prevalgono su `user_config.py`. |
+| `HOME_LAT`, `HOME_LNG`, `HOME_CITY`, `CANDIDATE_PROFILE` | `user_config.py` | Configurazione precedente, ancora supportata se non esiste `user_settings.json`. |
 | `OPENAI_API_KEY` | Variabile d'ambiente | Abilita l'analisi AI. Non inserirla nel codice. |
 | `SCRAPER_HEADLESS` | Variabile d'ambiente | `1` avvia il browser senza finestra. |
 | `SCRAPER_TIMEOUT_MS` | Variabile d'ambiente | Timeout predefinito di navigazione. |
 | `SCRAPER_ATTEMPTS` | Variabile d'ambiente | Tentativi per scraper, limitati dal codice. |
 
-I comuni accettati sono Chiasso, Mendrisio, Stabio, Balerna, Coldrerio, Morbio Inferiore, Novazzano e Riva San Vitale. L'elenco e i termini di ricerca di jobs.ch sono in `job_filter.py`; gli altri portali hanno strategie proprie. Le distanze sono in linea d'aria. Le date sconosciute restano vuote; le date relative sono approssimative.
+I comuni selezionabili sono Chiasso, Mendrisio, Stabio, Balerna, Coldrerio, Morbio Inferiore, Novazzano e Riva San Vitale. I termini personalizzati si applicano a jobs.ch; gli altri portali hanno strategie proprie. Le distanze sono in linea d'aria. Le date sconosciute restano vuote; le date relative sono approssimative. La dashboard mostra solo le fonti selezionate; la cache può conservare i risultati delle altre fonti.
 
 Le descrizioni vengono scaricate solo da host HTTPS dei portali previsti: richieste e reindirizzamenti verso altri host vengono bloccati. Il download usa un contesto separato, senza JavaScript né sessioni salvate. I link esterni restano nella dashboard, ma le descrizioni che richiedono siti esterni, login o JavaScript possono mancare.
 
@@ -81,8 +86,11 @@ Le descrizioni vengono scaricate solo da host HTTPS dei portali previsti: richie
 | `tests/` | Test automatici di filtri, dashboard, cache, scraper e calcoli. |
 | `requirements.txt` | Dipendenze di esecuzione e test. |
 | `user_config.example.py` | Modello della configurazione personale locale. |
+| `startup_config.py` | Procedura guidata, validazione e salvataggio delle scelte locali. |
+| `setup_panel.py`, `setup_panel.html` | Server locale, pannello e avvio della ricerca in background. |
+| `Avvia.bat` | Apre il pannello su Windows senza finestra di lavoro. |
 
-I file generati `index.html`, `jobs_cache.json`, `jobs_cache.partial.json`, `scan_report.json`, `debug/` e `profile/` sono esclusi da Git. Se una fonte fallisce, è bloccata o restituisce risultati incompleti o vuoti, i suoi annunci precedenti possono rimanere in cache e non essere aggiornati: controlla `scan_report.json`. Una scansione interrotta non sostituisce la cache principale.
+I file generati `user_settings.json`, `scraper.log`, `index.html`, `jobs_cache.json`, `jobs_cache.partial.json`, `scan_report.json`, `debug/` e `profile/` sono esclusi da Git. Se una fonte fallisce, è bloccata o restituisce risultati incompleti o vuoti, i suoi annunci precedenti possono rimanere in cache e non essere aggiornati: controlla `scan_report.json`. Una scansione interrotta non sostituisce la cache principale. In caso di errore il pannello rimanda a `scraper.log`, che può contenere dati degli annunci e va trattato come file privato.
 
 ## Test
 
@@ -96,7 +104,7 @@ I test coprono filtri, dashboard, distanze, stime, retry, cache, paginazione, va
 
 Il lordo stimato dall'AI e il netto calcolato sono indicativi, non costituiscono un'offerta verificata o un calcolo fiscale personalizzato. Consulta l'annuncio originale e verifica le regole applicabili.
 
-Non condividere o versionare `user_config.py`, cache, sessioni, screenshot di debug e dashboard senza averli controllati: possono contenere profilo personale, cookie, email di contatto o contenuti dei portali. Consulta le condizioni delle fonti e usa il login manuale dove previsto.
+Non condividere o versionare `user_settings.json`, `user_config.py`, cache, sessioni, screenshot di debug e dashboard senza averli controllati: possono contenere profilo personale, coordinate, cookie, email di contatto o contenuti dei portali. Consulta le condizioni delle fonti e usa il login manuale dove previsto.
 
 ## Licenza
 

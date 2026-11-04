@@ -15,6 +15,12 @@ from typing import Any
 
 from playwright.sync_api import sync_playwright
 
+import ai_analyzer
+import dashboard_builder
+import distance_calculator
+import job_filter
+import startup_config
+import setup_panel
 from ai_analyzer import AI_DESCRIPTION, AI_GROSS_SALARY, AI_REASON, AI_SUITABLE, analyze_jobs, normalize_ai_fields
 from dashboard_builder import generate_html
 from job_filter import filter_jobs, is_valid_job, normalize_url
@@ -566,6 +572,12 @@ def _add_scan_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_runtime_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--configure", action="store_true",
+                        help="open the local configuration panel")
+    parser.add_argument("--panel", action="store_true",
+                        help="open the local configuration panel")
+    parser.add_argument("--background", action="store_true",
+                        help="run without opening the configuration panel")
     parser.add_argument("--project-dir", action="store_true",
                         help="write relative outputs in the project directory")
     parser.add_argument("--headless", action="store_true",
@@ -612,12 +624,19 @@ def _finish_scan_only(args: argparse.Namespace, started_at: datetime) -> bool:
 
 
 def _finalize_jobs(valid_jobs: list[dict], started_at: datetime) -> None:
-    analyzed_jobs = analyze_jobs(valid_jobs)
+    if _AI_ENABLED:
+        analyzed_jobs = analyze_jobs(valid_jobs)
+    else:
+        print("[AI] Analisi disattivata nella configurazione.")
+        analyzed_jobs = valid_jobs
     if analyzed_jobs:
         _save_cache(analyzed_jobs)
     if analyzed_jobs and not any(job.get(AI_SUITABLE) is not None for job in analyzed_jobs):
         print("[HINT] To analyze missing cached jobs: python main.py --reanalyze")
-    generate_html(analyzed_jobs)
+    visible_jobs = analyzed_jobs
+    if _ACTIVE_SOURCES is not None:
+        visible_jobs = [job for job in analyzed_jobs if job.get("source") in _ACTIVE_SOURCES]
+    generate_html(visible_jobs)
     _open_dashboard(started_at)
 
 
@@ -625,6 +644,66 @@ def _open_dashboard(started_at: datetime) -> None:
     elapsed = int((datetime.now() - started_at).total_seconds())
     print(f"[DONE] Completed in {_format_seconds(elapsed)}.")
     webbrowser.open(Path("index.html").resolve().as_uri())
+
+
+_AI_ENABLED = True
+_ACTIVE_SOURCES: set[str] | None = None
+
+
+def _initial_settings(available_sources: set[str]) -> dict:
+    settings = startup_config.default_settings(job_filter.ALLOWED_CITIES, sorted(available_sources), job_filter.SEARCH_TERMS)
+    legacy_config = sys.modules.get("user_config")
+    if legacy_config is not None:
+        settings["home_city"] = distance_calculator.HOME_CITY
+        settings["home_lat"] = distance_calculator.HOME_LAT
+        settings["home_lng"] = distance_calculator.HOME_LNG
+        settings["candidate_profile"] = ai_analyzer._profile_from_config(legacy_config)
+    return settings
+
+
+def _apply_search_settings(settings: dict, args: argparse.Namespace) -> None:
+    global _AI_ENABLED, _ACTIVE_SOURCES
+    job_filter.ALLOWED_CITIES.clear()
+    job_filter.ALLOWED_CITIES.update(settings["cities"])
+    job_filter.SEARCH_TERMS[:] = settings["search_terms"]
+    distance_calculator._HOME_COORDINATES = None
+    if settings["home_lat"] is not None:
+        distance_calculator._HOME_COORDINATES = (settings["home_lat"], settings["home_lng"])
+    dashboard_builder.HOME_CITY = settings["home_city"] or "Home"
+    ai_analyzer.CANDIDATE_PROFILE_OVERRIDE = settings["candidate_profile"]
+    _AI_ENABLED = settings["ai_enabled"]
+    _ACTIVE_SOURCES = set(settings["sources"])
+    if args.timeout <= 0:
+        config.PAGE_TIMEOUT_MS = settings["timeout_ms"]
+    config.MAX_ATTEMPTS = settings["attempts"]
+    if not args.only:
+        args.only = ",".join(settings["sources"])
+    else:
+        requested_sources = [item.strip().lower() for item in args.only.split(",") if item.strip()]
+        for _, site, _ in SCRAPERS:
+            if _matches_site(site, requested_sources):
+                _ACTIVE_SOURCES.add(site)
+    if settings["headless"]:
+        config.HEADLESS = True
+
+
+def _setup_search(args: argparse.Namespace) -> bool:
+    available_sources = {site for _, site, _ in SCRAPERS if site != "monster.ch"}
+    allowed_cities = set(job_filter.ALLOWED_CITIES)
+    settings = startup_config.load_settings(startup_config.SETTINGS_FILE, allowed_cities, available_sources)
+    open_panel = args.panel or args.configure
+    if not any((args.background, args.dry_run, args.scan_only, args.reanalyze,
+                args.only, args.headless, args.project_dir)):
+        open_panel = True
+    if open_panel:
+        settings = settings or _initial_settings(available_sources)
+        setup_panel.open_panel(settings, allowed_cities, available_sources)
+        return False
+    if settings is not None:
+        _apply_search_settings(settings, args)
+    elif not args.dry_run:
+        print("[CONFIG] Nessuna configurazione salvata: uso le impostazioni precedenti.")
+    return True
 
 
 def main() -> None:
@@ -636,8 +715,18 @@ def main() -> None:
     _apply_cli_overrides(args)
     if args.auth:
         _run_auth_mode(args.auth)
+    try:
+        if not _setup_search(args):
+            return
+    except (ValueError, OSError, json.JSONDecodeError) as error:
+        print(f"[CONFIG] Errore: {error}")
+        sys.exit(1)
     valid_jobs = _run_scan_mode(args, started_at)
-    if valid_jobs is None or _finish_scan_only(args, started_at):
+    if valid_jobs is None:
+        if args.background:
+            sys.exit(1)
+        return
+    if _finish_scan_only(args, started_at):
         return
     _finalize_jobs(valid_jobs, started_at)
 

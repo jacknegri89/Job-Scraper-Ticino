@@ -17,7 +17,7 @@ HOME_LAT = float(HOME_LAT)
 HOME_LNG = float(HOME_LNG)
 HOME_CITY = str(HOME_CITY)
 
-_HOME_COORDINATES: tuple[float, float] = (HOME_LAT, HOME_LNG)
+_HOME_COORDINATES: tuple[float, float] | None = (HOME_LAT, HOME_LNG)
 _EARTH_RADIUS_KM = 6371.0
 
 _CITY_COORDINATES: dict[str, tuple[float, float]] = {
@@ -51,7 +51,7 @@ def km_from_home(city_raw: str | None) -> float | None:
     """Return the distance from home to a supported city, in kilometers."""
     city = normalize_city(city_raw or "")
     coordinates = _CITY_COORDINATES.get(city)
-    if coordinates is None:
+    if coordinates is None or _HOME_COORDINATES is None:
         return None
     return round(_haversine_km(_HOME_COORDINATES, coordinates), 1)
 
