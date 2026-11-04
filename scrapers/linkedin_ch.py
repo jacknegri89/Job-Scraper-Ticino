@@ -80,8 +80,7 @@ def _relative_to_date(text: str) -> str:
 
 
 def _means_today(lowered: str) -> bool:
-    today_words = ("just", "now", "oggi")
-    return not lowered or any(word in lowered for word in today_words)
+    return bool(re.search(r"\b(?:just|now|oggi)\b", lowered))
 
 
 def _relative_number_date(lowered: str) -> str:
@@ -92,7 +91,7 @@ def _relative_number_date(lowered: str) -> str:
             return (today - timedelta(days=int(match.group(1)) * multiplier)).isoformat()
     if re.search(r'\d+\s*(hour|ora|ore)', lowered):
         return today.isoformat()
-    return today.isoformat()
+    return ""
 
 
 def _relative_patterns() -> tuple[tuple[str, int], ...]:

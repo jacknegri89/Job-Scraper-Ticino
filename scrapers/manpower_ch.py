@@ -7,7 +7,7 @@ Pagination: /it/trova-lavoro/citta/{slug}/p{N}  (N = 1, 2, 3, ...)
 """
 
 import re
-from datetime import date
+from datetime import datetime
 
 from playwright.sync_api import BrowserContext, Page
 
@@ -33,10 +33,13 @@ def _page_closed(exc: Exception) -> bool:
 
 def _parse_date(text: str) -> str:
     """Convert '09/06/2026' to '2026-06-09'."""
-    m = re.match(r"(\d{2})/(\d{2})/(\d{4})", text.strip())
-    if m:
-        return f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
-    return date.today().isoformat()
+    match = re.match(r"(\d{2}/\d{2}/\d{4})", text.strip())
+    if not match:
+        return ""
+    try:
+        return datetime.strptime(match.group(1), "%d/%m/%Y").date().isoformat()
+    except ValueError:
+        return ""
 
 
 _JS_EXTRACT = r"""() => {

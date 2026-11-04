@@ -10,7 +10,7 @@ No Playwright needed: a simple HTTP GET is enough.
 
 import json
 import urllib.request
-from datetime import date
+from datetime import datetime
 
 from job_filter import categorize_job
 
@@ -22,16 +22,14 @@ _HEADERS   = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebK
 def _parse_date(raw: str) -> str:
     raw = raw.strip()
     if not raw:
-        return date.today().isoformat()
-    if len(raw) >= 10 and raw[4] == "-":
-        return raw[:10]
-    parts = raw.split("/")
-    if len(parts) == 3:
-        d, m, y = parts
-        if len(y) == 2:
-            y = "20" + y
-        return f"{y}-{int(m):02d}-{int(d):02d}"
-    return date.today().isoformat()
+        return ""
+    for date_format in ("%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y"):
+        date_text = raw[:10] if date_format == "%Y-%m-%d" else raw
+        try:
+            return datetime.strptime(date_text, date_format).date().isoformat()
+        except ValueError:
+            continue
+    return ""
 
 
 def scrape_frontaliereticino_ch(context: object) -> list[dict[str, str]]:  # context unused: pure HTTP.

@@ -422,7 +422,7 @@ h1 .dot { color: var(--green); }
 main { max-width: 1280px; margin: 0 auto; padding: 24px 24px 80px; }
 .grid {
   display: grid; gap: 14px;
-  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(330px, 100%), 1fr));
 }
 .card {
   background: var(--panel); border: 1px solid var(--line);

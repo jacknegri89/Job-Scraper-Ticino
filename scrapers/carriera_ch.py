@@ -1,6 +1,7 @@
 from playwright.sync_api import BrowserContext, Page
 
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, retry
+from scrapers.site_report import run_report
 from job_filter import categorize_job
 
 LIST_URL  = "https://www.carriera.ch/offerte/annunci-offerte-lavoro_0_0_{page}.html"
@@ -79,6 +80,7 @@ def _add_page_jobs(
         jobs = _load_page_jobs(page, url)
     except Exception as exc:
         print(f"[WARN] {url}: {exc}")
+        run_report.set_status("carriera.ch", "ok_partial", f"Page could not be loaded: {type(exc).__name__}")
         return False
     return _add_new_jobs(jobs, seen_urls, all_jobs)
 

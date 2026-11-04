@@ -16,7 +16,7 @@ from playwright.sync_api import sync_playwright
 from ai_analyzer import AI_DESCRIPTION, AI_GROSS_SALARY, AI_REASON, AI_SUITABLE, analyze_jobs, normalize_ai_fields
 from dashboard_builder import generate_html
 from job_filter import filter_jobs, is_valid_job, normalize_url
-from scrapers import SESSION_FILE, create_browser_context, fetch_description, save_session
+from scrapers import create_browser_context, fetch_description, save_session
 from scrapers import settings as config
 from scrapers.adecco_ch import scrape_adecco_ch
 from scrapers.carriera_ch import scrape_carriera_ch
@@ -139,8 +139,6 @@ def _context_alive(context: Any) -> bool:
 
 def _revive_context(playwright: Any, browser: Any, context: Any) -> tuple[Any, Any]:
     print("[WARN] Browser context closed. Creating a new one.")
-    if SESSION_FILE.exists():
-        SESSION_FILE.unlink()
     _close_quietly(browser)
     return create_browser_context(playwright)
 
@@ -179,10 +177,12 @@ def _merge_with_cache(new_jobs: list[dict], scanned_sources: set[str]) -> list[d
 
 
 def _read_cache_or_empty() -> list[dict]:
-    try:
-        return [normalize_ai_fields(job) for job in json.loads(CACHE_FILE.read_text(encoding="utf-8"))]
-    except Exception:
+    if not CACHE_FILE.exists():
         return []
+    jobs = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+    if not isinstance(jobs, list) or any(not isinstance(job, dict) for job in jobs):
+        raise ValueError(f"Invalid cache format in {CACHE_FILE}; cache was not overwritten")
+    return [normalize_ai_fields(job) for job in jobs]
 
 
 def _reuse_previous_data(valid_jobs: list[dict]) -> int:

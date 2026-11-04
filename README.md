@@ -23,6 +23,8 @@ python -m playwright install chromium
 
 `requirements.txt` is the required dependency file for this project. Keep it in
 sync when runtime or test dependencies change.
+Chromium runs with its sandbox enabled. On Linux, the system must support the
+Chromium sandbox; configure the host if browser startup reports a sandbox error.
 
 ## Quickstart
 
@@ -96,7 +98,8 @@ Override the navigation timeout in milliseconds.
 python main.py --auth linkedin
 ```
 Open a manual login flow for supported sites and save the browser session for
-later runs.
+later runs. The LinkedIn scraper uses its saved session. The Indeed scraper
+currently runs in public mode and does not use the session saved by `--auth indeed`.
 
 ```bash
 python main.py --reanalyze
@@ -165,6 +168,8 @@ Coldrerio, Morbio Inferiore, Novazzano, and Riva San Vitale. Search terms for
 jobs.ch and the municipality list are defined in `job_filter.py`; editing them
 requires changing code. The other portals use their own search strategies.
 Distances are straight-line estimates, not travel distances or times.
+Unknown posting dates remain blank; relative dates supplied by portals are
+approximate and can change when an announcement is refreshed.
 
 Generated files are intentionally ignored:
 

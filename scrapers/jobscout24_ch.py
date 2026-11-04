@@ -61,7 +61,7 @@ def _relative_to_date(text: str) -> str:
     """
     match = re.search(r'(\d+)\+?\s*([TWM])', text)
     if not match:
-        return date.today().isoformat()
+        return ""
     return _date_from_match(int(match.group(1)), match.group(2))
 
 
@@ -73,7 +73,7 @@ def _date_from_match(amount: int, unit: str) -> str:
         return (today - timedelta(weeks=amount)).isoformat()
     if unit == 'M':
         return (today - timedelta(days=amount * 30)).isoformat()
-    return today.isoformat()
+    return ""
 
 
 def _extract_jobs(page: Page) -> list[dict[str, str]]:

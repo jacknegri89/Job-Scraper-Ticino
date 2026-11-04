@@ -69,6 +69,7 @@ def _launch_browser(
 ) -> Browser:
     return playwright.chromium.launch(
         headless=headless,
+        chromium_sandbox=True,
         args=_browser_args(viewport),
     )
 
@@ -76,7 +77,6 @@ def _launch_browser(
 def _browser_args(viewport: dict[str, int]) -> list[str]:
     return [
         "--disable-blink-features=AutomationControlled",
-        "--no-sandbox",
         "--disable-infobars",
         "--disable-dev-shm-usage",
         f"--window-size={viewport['width']},{viewport['height']}",

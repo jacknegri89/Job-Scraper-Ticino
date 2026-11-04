@@ -93,6 +93,7 @@ def _print_auth_instructions(cfg: dict[str, str | tuple[str, ...]]) -> None:
 def _start_auth_browser(playwright: Playwright) -> tuple[Browser, BrowserContext]:
     browser = playwright.chromium.launch(
         headless=False,
+        chromium_sandbox=True,
         args=["--disable-blink-features=AutomationControlled"],
     )
     context = browser.new_context(locale="it-CH", timezone_id="Europe/Zurich")

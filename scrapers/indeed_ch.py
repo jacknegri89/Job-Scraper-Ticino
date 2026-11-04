@@ -46,11 +46,11 @@ def _relative_to_date(text: str) -> str:
         return (today - timedelta(days=matched_days)).isoformat()
     if "30+" in lowered or "mese" in lowered or "month" in lowered:
         return (today - timedelta(days=30)).isoformat()
-    return today.isoformat()
+    return ""
 
 
 def _is_today_text(lowered: str) -> bool:
-    return not lowered or any(word in lowered for word in ("oggi", "just posted", "appena", "now"))
+    return bool(re.search(r"\b(?:oggi|just posted|appena|now)\b", lowered))
 
 
 def _extract_day_count(lowered: str) -> int | None:
