@@ -244,6 +244,9 @@ def fetch_description(context: BrowserContext, url: str, max_chars: int = 3000) 
         description_context = context.browser.new_context(java_script_enabled=False, service_workers="block")
         page = _open_description_page(description_context, url)
         clean_text = _clean_description_text(_description_text(page))
+        if detect_block_reason(page) or looks_like_block_page(clean_text):
+            print("  [DESC] The portal showed a block page; no description saved")
+            return empty
         return _description_result(clean_text, max_chars)
     except Exception as e:
         print(f"  [DESC] error on {url[:60]}: {type(e).__name__}")
@@ -312,6 +315,19 @@ def _same_page(final_url: str, original_url: str) -> bool:
             and final_parts.path.rstrip("/") == original_parts.path.rstrip("/"))
 
 
+_BLOCK_TEXT_MARKERS = (
+    "your request has been blocked", "access denied", "verify you are human", "unusual traffic",
+    "pardon our interruption", "are you a robot", "non sono un robot", "captcha",
+)
+_BLOCK_TEXT_MAX_LENGTH = 600
+
+
+def looks_like_block_page(text: str) -> bool:
+    """A short text that is an anti-bot message must never be stored as a job description."""
+    lowered = (text or "").lower()
+    return len(lowered) <= _BLOCK_TEXT_MAX_LENGTH and any(marker in lowered for marker in _BLOCK_TEXT_MARKERS)
+
+
 def _valid_description_url(url: str) -> bool:
     try:
         parsed = urlsplit(url)
@@ -378,6 +394,12 @@ def _clean_description_text(description_text: str) -> str:
 def _description_result(clean_text: str, max_chars: int) -> dict[str, str]:
     # Extract email from the full text before truncating the description.
     return {"description": clean_text[:max_chars], "email": extract_email(clean_text)}
+
+
+def detect_block_reason(page: Page) -> str | None:
+    from scrapers.page_guard import detect_block
+
+    return detect_block(page)
 
 
 def _close_page(page: Page | None) -> None:

@@ -221,6 +221,9 @@ __marimo__/
 index.html
 jobs_cache.json
 jobs_cache.partial.json
+jobs_cache.json.bak
+jobs_cache.json.pre-v2.bak
+fx_cache.json
 .jobs-cache-*.tmp
 .claude/
 .test-deps/
@@ -233,6 +236,7 @@ profile/
 # Personal settings: home coordinates and AI profile
 user_config.py
 user_settings.json
+user_settings.json.v1.bak
 .settings-*.tmp
 scraper.log
 

@@ -675,7 +675,7 @@ h1 .to { display: inline-block; margin-left: 10px; color: #fff; opacity: .7; }
 .card:hover { border-color: var(--rule-2); border-left-color: var(--accent); }
 .card-main { padding: 20px 24px 22px; display: grid; gap: 12px; align-content: start; min-width: 0; }
 .card-side {
-  padding: 20px; display: flex; flex-direction: column; gap: 16px;
+  padding: 20px; display: flex; flex-direction: column; gap: 16px; min-width: 0;
   border-left: 2px dashed var(--rule); background: var(--card-2);
 }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
@@ -716,17 +716,17 @@ h1 .to { display: inline-block; margin-left: 10px; color: #fff; opacity: .7; }
 }
 .route-ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-3); }
 
-.salary { font-size: 12.5px; display: grid; gap: 4px;
+.salary { font-size: 12.5px; display: grid; gap: 4px; min-width: 0;
           background: var(--card); border: 1px solid var(--rule); padding: 10px 12px; }
 .sal-head { font-family: var(--sans); font-size: 11px; font-weight: 700; text-transform: uppercase;
             letter-spacing: .09em; color: var(--ink-3); padding-bottom: 4px; }
 .sal-row { display: flex; justify-content: space-between; gap: 10px; color: var(--ink-2); }
-.sal-num { font-family: var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sal-num { font-family: var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
 .sal-row.deduct .sal-num { color: var(--ink-2); }
-.sal-net { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px;
+.sal-net { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 10px; margin-top: 4px;
            padding: 7px 8px; background: var(--ink); color: var(--card);
            font-size: 13px; font-weight: 700; }
-.sal-net span:last-child { font-family: var(--mono); white-space: nowrap; }
+.sal-net span:last-child { font-family: var(--mono); margin-left: auto; }
 .sal-note { font-family: var(--sans); font-size: 11px; color: var(--ink-3); line-height: 1.35; }
 
 .email-link { font-size: 13px; color: var(--ink-2); word-break: break-all; }

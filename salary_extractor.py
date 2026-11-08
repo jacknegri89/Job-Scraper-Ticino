@@ -30,6 +30,7 @@ _CURRENCY = r"CHF|SFr\.?|Fr\.|EUR|€|euro"
 _SALARY_PATTERN = re.compile(
     r"(?P<cur_before>" + _CURRENCY + r")?\s?"
     r"(?P<first>" + _AMOUNT + r")"
+    r"(?:\s?(?P<cur_first>" + _CURRENCY + r"))?"
     r"(?:\s?(?:-|–|—|a|e|bis|to)\s?(?P<cur_middle>" + _CURRENCY + r")?\s?(?P<second>" + _AMOUNT + r"))?"
     r"\s?(?P<cur_after>" + _CURRENCY + r")?",
     re.IGNORECASE,
@@ -116,7 +117,7 @@ def _bound_of(before_text: str, low_amount: float, high_amount: float) -> str:
 
 
 def _currency_of(match: re.Match, before_text: str, default_currency: str) -> str:
-    for group_name in ("cur_before", "cur_middle", "cur_after"):
+    for group_name in ("cur_before", "cur_first", "cur_middle", "cur_after"):
         found = match.group(group_name)
         if found:
             return _currency_code(found)

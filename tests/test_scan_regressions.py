@@ -209,3 +209,23 @@ def test_invalid_ai_text_does_not_partially_modify_job():
     with pytest.raises(ValueError):
         _apply_validated_result(item, {"suitable": True, "reason": [], "description": "text", "salary": None}, "key")
     assert item == {}
+
+
+@pytest.mark.parametrize("text", [
+    "Your request has been blocked.",
+    "Access Denied | You don't have permission",
+    "Pardon Our Interruption",
+])
+def test_anti_bot_pages_are_never_stored_as_descriptions(text):
+    from scrapers import looks_like_block_page
+
+    assert looks_like_block_page(text) is True
+    assert main._needs_description({"description": text, "status": "active"}) is True
+
+
+def test_a_real_description_that_mentions_access_is_kept():
+    from scrapers import looks_like_block_page
+
+    long_text = "Gestione degli accessi e dei permessi utente. " * 30
+    assert looks_like_block_page(long_text) is False
+    assert main._needs_description({"description": long_text, "status": "active"}) is False

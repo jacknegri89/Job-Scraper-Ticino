@@ -71,3 +71,14 @@ def test_up_to_and_from_amounts_are_limits_not_exact_pay() -> None:
     assert lower["bound"] == "min"
     assert exact["bound"] == "exact"
     assert extract_salary("28.000 - 32.000 euro all'anno")["bound"] == "exact"
+
+
+def test_range_with_the_currency_after_each_amount_is_read_as_a_range() -> None:
+    # Indeed writes salaries like this.
+    result = extract_salary("28.000 € - 32.000 € all'anno")
+    assert (result["min"], result["max"]) == (28000, 32000)
+    assert result["currency"] == "EUR"
+    assert result["period"] == "year"
+    result = extract_salary("32.731,92 € - 43.000,00 € all'anno")
+    assert (result["min"], result["max"]) == (32731.92, 43000)
+    assert extract_salary("800 € al mese")["min"] == 800

@@ -27,7 +27,7 @@ from job_lifecycle import apply_verification, jobs_to_verify, merge_scan
 from job_pipeline import PipelineResult, exclusion_reason, process_jobs
 from job_status import STATUS_ACTIVE
 from preferences import SearchPreferences, preferences_from_settings
-from scrapers import check_listing, create_browser_context, fetch_description, save_session
+from scrapers import check_listing, create_browser_context, fetch_description, looks_like_block_page, save_session
 from scrapers import settings as config
 from scrapers.adecco_ch import scrape_adecco_ch
 from scrapers.carriera_ch import scrape_carriera_ch
@@ -388,7 +388,8 @@ def _download_descriptions(context: Any, valid_jobs: list[dict]) -> None:
 
 def _needs_description(job: dict) -> bool:
     """Only listings seen in this scan are opened; cached ones may be gone or blocked."""
-    if job.get("description"):
+    description = str(job.get("description") or "")
+    if description and not looks_like_block_page(description):
         return False
     return job.get("status") in (None, STATUS_ACTIVE)
 
