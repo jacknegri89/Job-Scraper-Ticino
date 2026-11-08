@@ -105,7 +105,8 @@ def _currency_of(match: re.Match, before_text: str, default_currency: str) -> st
             return _currency_code(found)
     if _RAL_PATTERN.search(before_text):
         return CURRENCY_EUR
-    return ""
+    # Only structured salary fields pass a default currency; free text never does.
+    return default_currency
 
 
 def _currency_code(raw_currency: str) -> str:
