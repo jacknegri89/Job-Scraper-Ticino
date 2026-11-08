@@ -28,6 +28,7 @@ LOCK_PATH = PROJECT_DIR / run_lock.LOCK_FILE_NAME
 MAX_BODY_BYTES = 16384
 MAX_REQUESTS_PER_MINUTE = 30
 MAX_PLACE_QUERY_LENGTH = 80
+MAX_LOG_BYTES = 5 * 1024 * 1024
 
 
 def content_security_policy(script_nonce=None):
@@ -37,6 +38,16 @@ def content_security_policy(script_nonce=None):
         script_source = f"'nonce-{script_nonce}'"
     return ("default-src 'none'; style-src 'unsafe-inline'; script-src " + script_source +
             "; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+
+
+def rotate_log_if_large(log_path, max_bytes=MAX_LOG_BYTES):
+    """Keep scraper.log from growing for ever: past the limit it becomes scraper.log.old."""
+    try:
+        if log_path.stat().st_size <= max_bytes:
+            return
+        os.replace(log_path, log_path.with_name(log_path.name + ".old"))
+    except OSError:
+        pass
 
 
 def status_for_exit_code(exit_code):
@@ -89,6 +100,7 @@ class LocalPanelServer(ThreadingHTTPServer):
                 raise ValueError("A search is already running (started from another window or a scheduled task).")
             startup_config.save_settings(startup_config.SETTINGS_FILE, settings)
             self.settings = settings
+            rotate_log_if_large(LOG_FILE)
             command = [sys.executable, str(PROJECT_DIR / "main.py"), "--background", "--headless", "--project-dir"]
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             with LOG_FILE.open("a", encoding="utf-8") as log_file:

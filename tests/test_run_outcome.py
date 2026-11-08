@@ -298,3 +298,17 @@ def test_the_panel_refuses_to_start_while_another_scan_holds_the_lock(monkeypatc
                 server.start(settings)
     finally:
         server.server_close()
+
+
+def test_a_large_log_is_rotated_and_a_small_one_is_left_alone(tmp_path) -> None:
+    log = tmp_path / "scraper.log"
+    log.write_text("x" * 10, encoding="utf-8")
+    setup_panel.rotate_log_if_large(log, max_bytes=100)
+    assert log.exists()
+
+    log.write_text("x" * 500, encoding="utf-8")
+    setup_panel.rotate_log_if_large(log, max_bytes=100)
+    assert not log.exists()
+    assert (tmp_path / "scraper.log.old").read_text(encoding="utf-8") == "x" * 500
+
+    setup_panel.rotate_log_if_large(tmp_path / "missing.log", max_bytes=100)  # no log yet: nothing to do
