@@ -93,3 +93,13 @@ def test_overall_status_for_each_important_combination(statuses: dict, expected:
 def test_exit_code_follows_the_overall_status(overall: str, code: int) -> None:
     assert exit_code_for_overall_status(overall) == code
     assert len({EXIT_SUCCESS, EXIT_FAILURE, EXIT_PARTIAL}) == 3
+
+
+def test_the_precise_failure_cause_survives_a_partial_note_with_nothing_read() -> None:
+    report = RunReport()
+    report.set_status("jobs.ch", "ok_partial", "Page could not be loaded: TimeoutError")
+
+    result = report.finish("jobs.ch", 0, 1.0, status="timeout", reason="Timeout 30000ms exceeded")
+
+    assert result.status == "timeout"
+    assert "no listing could be read" in result.reason

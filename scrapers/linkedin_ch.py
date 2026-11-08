@@ -105,14 +105,6 @@ def _relative_patterns() -> tuple[tuple[str, int], ...]:
     )
 
 
-def _clean_url(href: str) -> str:
-    """Remove LinkedIn tracking parameters, keeping only the path."""
-    if not href:
-        return ""
-    # Drop query parameters such as position=, pageNum=, refId=, and trackingId=.
-    return href.split("?")[0]
-
-
 # ---------------------------------------------------------------------------
 # JavaScript DOM extractor, executed in the browser.
 # ---------------------------------------------------------------------------

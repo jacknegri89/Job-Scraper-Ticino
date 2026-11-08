@@ -3,7 +3,6 @@
 from dataclasses import dataclass, field
 
 from geo import ALL_REGIONS, AreaPolicy, fold_text
-from job_classifier import CONTRACT_TYPES, SENIORITY_LEVELS
 
 DEFAULT_RADIUS_KM = 30
 DEFAULT_EXPIRY_DAYS = 14
@@ -78,10 +77,3 @@ def _optional_set(values: list[str] | None) -> frozenset[str] | None:
         return None
     return frozenset(values)
 
-
-def valid_seniority_levels() -> tuple[str, ...]:
-    return SENIORITY_LEVELS
-
-
-def valid_contract_types() -> tuple[str, ...]:
-    return CONTRACT_TYPES

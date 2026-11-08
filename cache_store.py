@@ -66,6 +66,11 @@ def save_jobs(cache_file: Path, jobs: list[dict]) -> None:
             temporary_path.unlink()
 
 
+# Caches already backed up by this process. A run saves twice (after the scan and after the
+# analysis); the second save must not replace the backup of the previous run with the first.
+_BACKED_UP_IN_THIS_RUN: set[Path] = set()
+
+
 def _backup_before_replacing(cache_file: Path) -> None:
     if not cache_file.exists():
         return
@@ -73,4 +78,8 @@ def _backup_before_replacing(cache_file: Path) -> None:
         migration_backup = cache_file.with_name(cache_file.name + MIGRATION_BACKUP_SUFFIX)
         if not migration_backup.exists():
             shutil.copy2(cache_file, migration_backup)
+    resolved_path = cache_file.resolve()
+    if resolved_path in _BACKED_UP_IN_THIS_RUN:
+        return
     shutil.copy2(cache_file, cache_file.with_name(cache_file.name + ROLLING_BACKUP_SUFFIX))
+    _BACKED_UP_IN_THIS_RUN.add(resolved_path)

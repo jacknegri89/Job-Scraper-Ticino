@@ -396,11 +396,6 @@ def _is_fatal(error: Exception) -> bool:
     return getattr(error, "status_code", None) in (401, 403)
 
 
-def _is_bad_request(error: Exception) -> bool:
-    """The API refused this particular listing (for example a content filter)."""
-    return getattr(error, "status_code", None) == 400
-
-
 def _decode_model_json(content: str) -> JsonObject:
     parsed = json.loads(_strip_json_fence(content))
     if not isinstance(parsed, dict):

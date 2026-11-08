@@ -165,3 +165,15 @@ def test_corrupt_cache_is_reported_and_left_untouched(tmp_path) -> None:
     with pytest.raises(CacheFormatError):
         load_jobs(cache_file)
     assert json.loads(cache_file.read_text(encoding="utf-8")) == {"not": "a list"}
+
+
+def test_a_second_save_in_the_same_run_keeps_the_backup_of_the_previous_run(tmp_path) -> None:
+    cache = tmp_path / "jobs_cache.json"
+    save_jobs(cache, [normalize_job(_job(1))])  # the cache left by the previous run
+    previous_run_content = cache.read_text(encoding="utf-8")
+
+    save_jobs(cache, [normalize_job(_job(1)), normalize_job(_job(2))])  # after the scan
+    save_jobs(cache, [normalize_job(_job(1)), normalize_job(_job(2)), normalize_job(_job(3))])  # after the analysis
+
+    assert (tmp_path / "jobs_cache.json.bak").read_text(encoding="utf-8") == previous_run_content
+    assert len(load_jobs(cache)) == 3

@@ -162,6 +162,7 @@ def _status_with_override(
     if not override:
         return status, reason
 
+    reported_status = status
     status = override["status"]
     reason = override["reason"] or reason
     if jobs > 0 and status in _GATE_STATUSES:
@@ -170,8 +171,10 @@ def _status_with_override(
         # Listings were read, so the source is not empty; part of it was not understood.
         return "ok_partial", _partial_reason(status, override["reason"])
     if jobs == 0 and status == "ok_partial":
-        # "Partial" needs something read. A page that failed with nothing collected is a failure.
-        return "error", _partial_reason("no listing could be read", reason)
+        # "Partial" needs something read. A page that failed with nothing collected is a failure,
+        # and the more precise cause (timeout, network error...) is kept when the scraper gave one.
+        failure_status = reported_status if reported_status in _FAILURE_STATUSES else "error"
+        return failure_status, _partial_reason("no listing could be read", reason)
     return status, reason
 
 
@@ -182,6 +185,7 @@ def _partial_reason(status: str, reason: str) -> str:
 
 
 _GATE_STATUSES = ("requires_auth", "requires_manual_login", "blocked")
+_FAILURE_STATUSES = ("timeout", "network_error", "browser_closed", "selector_broken", "error", *_GATE_STATUSES)
 
 
 def _issue_rank(status: str) -> int:
