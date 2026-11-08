@@ -1,12 +1,12 @@
 # Contributing
 
-Thanks for taking the time to improve Job Scraper Ticino. Bug reports, fixes for broken scrapers and new sources are all welcome.
+Thanks for taking the time to improve JobScraper. Bug reports, fixes for broken scrapers and new sources are all welcome.
 
 ## Set up
 
 ```bash
-git clone https://github.com/jacknegri89/Job-Scraper-Ticino.git
-cd Job-Scraper-Ticino
+git clone https://github.com/jacknegri89/JobScraper.git
+cd JobScraper
 python -m venv .venv
 # Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
 python -m pip install -r requirements.txt ruff

@@ -1,11 +1,11 @@
 <div align="center">
 
-# Job Scraper Ticino
+# JobScraper
 
 **Eleven Swiss job portals, one private dashboard.**<br>
 Built for cross-border commuters who live in Italy and work in the Mendrisiotto (Ticino).
 
-[![CI](https://github.com/jacknegri89/Job-Scraper-Ticino/actions/workflows/ci.yml/badge.svg)](https://github.com/jacknegri89/Job-Scraper-Ticino/actions/workflows/ci.yml)
+[![CI](https://github.com/jacknegri89/JobScraper/actions/workflows/ci.yml/badge.svg)](https://github.com/jacknegri89/JobScraper/actions/workflows/ci.yml)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![Playwright](https://img.shields.io/badge/scraping-Playwright-2EAD33?logo=playwright&logoColor=white)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -24,7 +24,7 @@ Built for cross-border commuters who live in Italy and work in the Mendrisiotto 
 
 Looking for a job across the border means checking a dozen portals, each with its own filters, and still not knowing the one thing that matters: *what would I actually take home in Italy, and how far is it from my door?*
 
-Job Scraper Ticino collects the listings for you, keeps only the eight municipalities around Chiasso and Mendrisio, removes duplicates, and turns the result into a single searchable page. It runs on your computer. There is no server, no account and no tracking.
+JobScraper collects the listings for you, keeps only the eight municipalities around Chiasso and Mendrisio, removes duplicates, and turns the result into a single searchable page. It runs on your computer. There is no server, no account and no tracking.
 
 ## Features
 
@@ -42,8 +42,8 @@ Job Scraper Ticino collects the listings for you, keeps only the eight municipal
 You need Python 3.10 or later.
 
 ```bash
-git clone https://github.com/jacknegri89/Job-Scraper-Ticino.git
-cd Job-Scraper-Ticino
+git clone https://github.com/jacknegri89/JobScraper.git
+cd JobScraper
 
 python -m venv .venv
 # Windows:      .venv\Scripts\activate

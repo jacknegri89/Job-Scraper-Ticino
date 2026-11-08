@@ -1,4 +1,4 @@
-"""Command-line entry point for the Ticino job scraper."""
+"""Command-line entry point for JobScraper."""
 
 import argparse
 import json
@@ -558,7 +558,7 @@ def _save_completed_or_partial(valid_jobs: list[dict], completed: bool) -> None:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Ticino job scraper")
+    parser = argparse.ArgumentParser(description="JobScraper")
     _add_scan_args(parser)
     _add_runtime_args(parser)
     return parser.parse_args()

@@ -39,7 +39,7 @@ def test_panel_requires_unpredictable_path(panel):
     assert status == 404
     status, html = request(panel, "GET", f"/{panel.token}")
     assert status == 200
-    assert b"Job Scraper Ticino" in html
+    assert b"JobScraper" in html
 
 
 def test_panel_rejects_cross_origin_and_missing_token(panel):
