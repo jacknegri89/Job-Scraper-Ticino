@@ -12,7 +12,7 @@ This project runs on your own computer. The parts most worth reviewing are:
 
 - the local control panel (`setup_panel.py`), which serves a page on `127.0.0.1` and starts the scraper;
 - the generated dashboard (`dashboard_builder.py`), which displays text scraped from third-party sites;
-- the description download in `scrapers/__init__.py`, which is limited to a list of allowed HTTPS hosts.
+- the description download in `scrapers/__init__.py`, which is limited to a list of allowed HTTPS hosts and checks every redirect before it is requested.
 
 ## Supported versions
 
