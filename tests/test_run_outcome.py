@@ -114,7 +114,7 @@ def test_when_every_source_fails_cache_and_dashboard_stay_untouched(monkeypatch,
 def test_a_partial_scan_still_saves_what_was_read_with_the_saved_jobs(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
     cache = tmp_path / "jobs_cache.json"
-    cache.write_text(json.dumps([_raw("https://example.ch/old", "Old job")]), encoding="utf-8")
+    cache.write_text(json.dumps([_raw("https://example.ch/old", "Old job", source="indeed.it")]), encoding="utf-8")
     monkeypatch.setattr(main, "CACHE_FILE", cache)
     _report_with(monkeypatch, ("jobs.ch", 1, "ok"), ("indeed.it", 0, "blocked"))
     jobs = main._build_job_list([_raw("https://example.ch/new", "New job")], False)
