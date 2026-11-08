@@ -17,6 +17,7 @@ AI_SUITABLE = "ai_suitable"
 AI_REASON = "ai_reason"
 AI_DESCRIPTION = "ai_description"
 AI_GROSS_SALARY = "estimated_gross_salary_chf"
+CANDIDATE_PROFILE_OVERRIDE: str | None = None
 
 _LEGACY_AI_FIELDS = {
     "llm_adatto": AI_SUITABLE,
@@ -222,6 +223,8 @@ def _handle_api_error(job_index: int, attempt: int, wait: int, exc: Exception) -
 
 
 def _load_candidate_profile() -> str:
+    if CANDIDATE_PROFILE_OVERRIDE is not None:
+        return CANDIDATE_PROFILE_OVERRIDE or _GENERIC_CANDIDATE_PROFILE
     try:
         config = importlib.import_module("user_config")
     except ModuleNotFoundError as exc:

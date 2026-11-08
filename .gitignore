@@ -232,6 +232,9 @@ profile/
 
 # Personal settings: home coordinates and AI profile
 user_config.py
+user_settings.json
+.settings-*.tmp
+scraper.log
 
 # Local planning artifacts for agents; not needed to run the scraper
 .planning/

@@ -119,9 +119,10 @@ def test_missing_dates_in_source_jobs_remain_empty():
 
 def test_project_dir_option_selects_project_directory(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    args = SimpleNamespace(project_dir=True, headless=False, timeout=0, auth="")
+    args = SimpleNamespace(project_dir=True, headless=False, timeout=0, auth="", background=False)
     monkeypatch.setattr(main, "_parse_args", lambda: args)
     monkeypatch.setattr(main, "_run_scan_mode", lambda *_: None)
+    monkeypatch.setattr(main, "_setup_search", lambda *_: True)
 
     main.main()
 
