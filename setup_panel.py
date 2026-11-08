@@ -92,7 +92,7 @@ class LocalPanelServer(ThreadingHTTPServer):
             command = [sys.executable, str(PROJECT_DIR / "main.py"), "--background", "--headless", "--project-dir"]
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             with LOG_FILE.open("a", encoding="utf-8") as log_file:
-                self.process = subprocess.Popen(
+                self.process = subprocess.Popen(  # noqa: S603 - fixed command: this interpreter runs main.py
                     command, cwd=PROJECT_DIR, stdin=subprocess.DEVNULL,
                     stdout=log_file, stderr=subprocess.STDOUT, creationflags=flags,
                 )

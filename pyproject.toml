@@ -8,5 +8,12 @@ pythonpath = ["."]
 target-version = "py310"
 
 [tool.ruff.lint]
-# Pyflakes (F), syntax errors (E9) and likely bugs (B).
-select = ["F", "E9", "B"]
+# Pyflakes (F), syntax errors (E9), likely bugs (B) and the security checks of bandit (S).
+select = ["F", "E9", "B", "S"]
+# Not security problems here: asserts in tests, pages and files closed on a best-effort basis,
+# and random delays and user agents (nothing secret depends on them).
+ignore = ["S101", "S110", "S311"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests start the project's own scripts with a fixed interpreter.
+"tests/*" = ["S603"]

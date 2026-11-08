@@ -52,7 +52,7 @@ def _download_index() -> list[dict[str, str]]:
 
 def _read_index_response() -> list[dict[str, str]]:
     request = urllib.request.Request(_INDEX_URL, headers=_HEADERS)
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310 - the URL is a fixed https constant
         body = response.read(_MAX_INDEX_BYTES + 1)
     if len(body) > _MAX_INDEX_BYTES:
         raise ValueError("the job index is larger than expected; it was not read")
