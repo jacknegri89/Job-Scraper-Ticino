@@ -9,15 +9,18 @@ try:
 except ModuleNotFoundError as error:
     if error.name != "user_config":
         raise
-    HOME_LAT = 45.0
-    HOME_LNG = 9.0
+    # No personal config: there is no home point, so distances stay hidden.
+    HOME_LAT = None
+    HOME_LNG = None
     HOME_CITY = "Home"
 
-HOME_LAT = float(HOME_LAT)
-HOME_LNG = float(HOME_LNG)
 HOME_CITY = str(HOME_CITY)
 
-_HOME_COORDINATES: tuple[float, float] | None = (HOME_LAT, HOME_LNG)
+_HOME_COORDINATES: tuple[float, float] | None = None
+if HOME_LAT is not None and HOME_LNG is not None:
+    HOME_LAT = float(HOME_LAT)
+    HOME_LNG = float(HOME_LNG)
+    _HOME_COORDINATES = (HOME_LAT, HOME_LNG)
 _EARTH_RADIUS_KM = 6371.0
 
 _CITY_COORDINATES: dict[str, tuple[float, float]] = {
@@ -47,6 +50,11 @@ def _haversine_km(
     return 2 * _EARTH_RADIUS_KM * asin(sqrt(half_chord))
 
 
+def is_home_configured() -> bool:
+    """True when a home point is set; otherwise no distance can be shown."""
+    return _HOME_COORDINATES is not None
+
+
 def km_from_home(city_raw: str | None) -> float | None:
     """Return the distance from home to a supported city, in kilometers."""
     city = normalize_city(city_raw or "")
@@ -61,4 +69,4 @@ def km_da_casa(city_raw: str | None) -> float | None:
     return km_from_home(city_raw)
 
 
-__all__ = ["HOME_CITY", "km_from_home", "km_da_casa"]
+__all__ = ["HOME_CITY", "is_home_configured", "km_from_home", "km_da_casa"]

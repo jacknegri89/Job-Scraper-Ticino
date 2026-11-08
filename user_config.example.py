@@ -1,9 +1,10 @@
 # Copy this file to user_config.py and fill in local private settings.
 # Keep user_config.py out of version control.
 
-# Replace these placeholders with your starting point for distance estimates.
-HOME_LAT = 0.0
-HOME_LNG = 0.0
+# Your starting point for distance estimates, in decimal degrees (for example 45.83 and 9.03).
+# Leave both as None to hide distances in the dashboard.
+HOME_LAT = None
+HOME_LNG = None
 HOME_CITY = "Home"
 
 # Profile sent to the AI model when assessing whether a job fits.

@@ -72,6 +72,7 @@ KEYWORDS = {
         "Controllo qualita", "Controllo qualita'",
         "Addetto controllo qualita", "Operaio metalmeccanico",
         "Metalmeccanico", "Saldatore", "Saldatura",
+        "Tornitore", "Fresatore", "Meccanico",
     ],
     "food_service": [
         "Cameriere", "Cameriera", "Chef de rang",

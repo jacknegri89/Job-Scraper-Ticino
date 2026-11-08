@@ -154,3 +154,36 @@ def test_page_blocks_external_resources(tmp_path: Path, monkeypatch: MonkeyPatch
 
     assert "Content-Security-Policy" in page
     assert "default-src 'none'" in page
+
+
+def test_dashboard_hides_distance_when_home_is_not_configured(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+    monkeypatch.setattr(dashboard, "is_home_configured", lambda: False)
+    monkeypatch.setattr(dashboard, "km_from_home", lambda _city: None)
+    output_path = tmp_path / "index.html"
+
+    dashboard.generate_html([_job()], output_path)
+    page = output_path.read_text(encoding="utf-8")
+
+    assert "From Test Home" not in page
+    assert "Nearest" not in page
+    assert 'class="route"' not in page
+
+
+def test_good_match_filter_is_hidden_without_ai_results(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+    page_without_ai = tmp_path / "without_ai.html"
+    page_with_ai = tmp_path / "with_ai.html"
+
+    dashboard.generate_html([_job()], page_without_ai)
+    dashboard.generate_html([_job(ai_suitable=True, ai_reason="ok")], page_with_ai)
+
+    assert "good matches" not in page_without_ai.read_text(encoding="utf-8")
+    assert 'id="chip-ai"' not in page_without_ai.read_text(encoding="utf-8")
+    assert 'id="chip-ai"' in page_with_ai.read_text(encoding="utf-8")

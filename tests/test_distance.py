@@ -92,3 +92,12 @@ def test_existing_dashboard_api_matches_english_api(
     distance = load_distance_module(monkeypatch)
 
     assert distance.km_da_casa("Chiasso") == distance.km_from_home("Chiasso")
+
+
+def test_without_personal_config_distances_are_disabled(monkeypatch: MonkeyPatch) -> None:
+    # A None entry makes "from user_config import ..." fail as if the file did not exist.
+    monkeypatch.setitem(sys.modules, "user_config", None)
+    distance = importlib.reload(importlib.import_module("distance_calculator"))
+
+    assert distance.is_home_configured() is False
+    assert distance.km_from_home("Chiasso") is None

@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from distance_calculator import HOME_CITY, km_from_home
+from distance_calculator import HOME_CITY, is_home_configured, km_from_home
 from salary_calculator import calculate_net_salary
 from ai_analyzer import AI_DESCRIPTION, AI_GROSS_SALARY, AI_REASON, AI_SUITABLE, normalize_ai_fields
 
@@ -324,11 +324,11 @@ def _card_meta(job: Job, view: dict[str, Any]) -> str:
 
 def _card_meta_rows(job: Job, view: dict[str, Any]) -> list[str]:
     home_city_label = _escape_html(HOME_CITY)
-    return [
-        _meta_row("Location", _escape_html(job.get("city", ""))),
-        _meta_row(f"From {home_city_label}", _distance_label(view["km"])),
-        _meta_row("Posted", _escape_html(job.get("date", "")) or "-"),
-    ]
+    rows = [_meta_row("Location", _escape_html(job.get("city", "")))]
+    if is_home_configured():
+        rows.append(_meta_row(f"From {home_city_label}", _distance_label(view["km"])))
+    rows.append(_meta_row("Posted", _escape_html(job.get("date", "")) or "-"))
+    return rows
 
 
 def _meta_row(label: str, value: str) -> str:
@@ -573,10 +573,10 @@ footer {
       <span class="updated">Updated __NOW__</span>
     </div>
     <p class="subtitle">Listings from __NSOURCES__ Swiss portals, filtered for the
-       Mendrisio district. Distances are straight-line estimates from __HOME_CITY__.</p>
+       Mendrisio district.__DISTANCE_NOTE__</p>
     <div class="tally">
       <div class="tally-item"><b>__COUNT__</b><span>cached jobs</span></div>
-      <div class="tally-item"><b>__N_MATCHES__</b><span>good matches</span></div>
+      __MATCH_TALLY__
       <div class="tally-item"><b>__NSOURCES__</b><span>sources</span></div>
     </div>
   </div>
@@ -592,7 +592,7 @@ footer {
       <label class="field-label" for="sort">Sort by</label>
       <select id="sort">
         <option value="date">Newest</option>
-        <option value="km">Nearest</option>
+        __NEAREST_OPTION__
       </select>
     </div>
     <p class="found" aria-live="polite"><b id="visible-n">__COUNT__</b> results</p>
@@ -601,7 +601,7 @@ footer {
       <div class="chips" role="group" aria-labelledby="field-label">
         <button class="chip" data-cat="all" aria-pressed="true">All <span class="n">__COUNT__</span></button>
         __CAT_CHIPS__
-        <button class="chip chip-ai" id="chip-ai" aria-pressed="false">&#10003; Good matches__CHIP_AI_N__</button>
+        __CHIP_AI__
       </div>
     </div>
   </aside>
@@ -759,20 +759,48 @@ def _dashboard_page(jobs: list[Job]) -> str:
 
 def _template_replacements(jobs: list[Job]) -> dict[str, str]:
     matches = sum(1 for job in jobs if job.get(AI_SUITABLE) is True)
+    has_ai_results = any(job.get(AI_SUITABLE) is not None for job in jobs)
     counts = _count_by_category(jobs)
     source_count, source_names = _source_list(jobs)
     return {
-        "__NOW__": _escape_html(datetime.now().strftime("%Y-%m-%d - %H:%M")), "__N_MATCHES__": str(matches),
-        "__CHIP_AI_N__": _ai_chip_count(matches), "__COUNT__": str(len(jobs)),
+        "__NOW__": _escape_html(datetime.now().strftime("%Y-%m-%d - %H:%M")),
+        "__MATCH_TALLY__": _match_tally(matches, has_ai_results),
+        "__CHIP_AI__": _ai_chip(matches, has_ai_results), "__COUNT__": str(len(jobs)),
         "__NSOURCES__": str(source_count), "__SOURCELIST__": _escape_html(source_names),
-        "__CAT_CHIPS__": _category_chips(counts), "__HOME_CITY__": _escape_html(HOME_CITY),
+        "__CAT_CHIPS__": _category_chips(counts),
+        "__DISTANCE_NOTE__": _distance_note(), "__NEAREST_OPTION__": _nearest_option(),
         "__CARDS__": "\n".join(build_card(job) for job in jobs),
         "__EMPTY_SUB__": _empty_subtitle(jobs),
     }
 
 
-def _ai_chip_count(matches: int) -> str:
-    return f' <span class="n">{matches}</span>' if matches else ""
+def _distance_note() -> str:
+    if not is_home_configured():
+        return ""
+    return f" Distances are straight-line estimates from {_escape_html(HOME_CITY)}."
+
+
+def _nearest_option() -> str:
+    if not is_home_configured():
+        return ""
+    return '<option value="km">Nearest</option>'
+
+
+def _match_tally(matches: int, has_ai_results: bool) -> str:
+    """Show the match count only when the AI has judged at least one job."""
+    if not has_ai_results:
+        return ""
+    return f'<div class="tally-item"><b>{matches}</b><span>good matches</span></div>'
+
+
+def _ai_chip(matches: int, has_ai_results: bool) -> str:
+    """The "Good matches" filter makes no sense without AI results, so it is hidden."""
+    if not has_ai_results:
+        return ""
+    return (
+        '<button class="chip chip-ai" id="chip-ai" aria-pressed="false">'
+        f'&#10003; Good matches <span class="n">{matches}</span></button>'
+    )
 
 
 def _empty_subtitle(jobs: list[Job]) -> str:

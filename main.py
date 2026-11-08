@@ -43,6 +43,10 @@ from scrapers.site_report import ScrapeError, classify_exception, run_report
 
 CACHE_FILE = Path("jobs_cache.json")
 
+# Set by _apply_search_settings when a saved panel configuration is used.
+_AI_ENABLED = True
+_ACTIVE_SOURCES: set[str] | None = None
+
 ScraperEntry = tuple[str, str, Callable[[Any], list[dict]]]
 ProbeEntry = tuple[str, str]
 
@@ -572,9 +576,7 @@ def _add_scan_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_runtime_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--configure", action="store_true",
-                        help="open the local configuration panel")
-    parser.add_argument("--panel", action="store_true",
+    parser.add_argument("--panel", "--configure", action="store_true", dest="panel",
                         help="open the local configuration panel")
     parser.add_argument("--background", action="store_true",
                         help="run without opening the configuration panel")
@@ -631,7 +633,7 @@ def _finalize_jobs(valid_jobs: list[dict], started_at: datetime) -> None:
         analyzed_jobs = valid_jobs
     if analyzed_jobs:
         _save_cache(analyzed_jobs)
-    if analyzed_jobs and not any(job.get(AI_SUITABLE) is not None for job in analyzed_jobs):
+    if _AI_ENABLED and analyzed_jobs and not any(job.get(AI_SUITABLE) is not None for job in analyzed_jobs):
         print("[HINT] To analyze missing cached jobs: python main.py --reanalyze")
     visible_jobs = analyzed_jobs
     if _ACTIVE_SOURCES is not None:
@@ -644,10 +646,6 @@ def _open_dashboard(started_at: datetime) -> None:
     elapsed = int((datetime.now() - started_at).total_seconds())
     print(f"[DONE] Completed in {_format_seconds(elapsed)}.")
     webbrowser.open(Path("index.html").resolve().as_uri())
-
-
-_AI_ENABLED = True
-_ACTIVE_SOURCES: set[str] | None = None
 
 
 def _initial_settings(available_sources: set[str]) -> dict:
@@ -691,7 +689,7 @@ def _setup_search(args: argparse.Namespace) -> bool:
     available_sources = {site for _, site, _ in SCRAPERS if site != "monster.ch"}
     allowed_cities = set(job_filter.ALLOWED_CITIES)
     settings = startup_config.load_settings(startup_config.SETTINGS_FILE, allowed_cities, available_sources)
-    open_panel = args.panel or args.configure
+    open_panel = args.panel
     if not any((args.background, args.dry_run, args.scan_only, args.reanalyze,
                 args.only, args.headless, args.project_dir)):
         open_panel = True

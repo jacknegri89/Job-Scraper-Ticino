@@ -99,4 +99,6 @@ def test_category_from_title() -> None:
     assert categorize_job("Magazziniere turno notte") == "logistics"
     assert categorize_job("Elettricista AFC") == "tech"
     assert categorize_job("Cameriere di sala") == "food_service"
+    assert categorize_job("Tornitore CNC Fanuc") == "production"
+    assert categorize_job("Meccanico manutentore di autoveicoli") == "production"
     assert categorize_job("Direttore generale") == "other"
