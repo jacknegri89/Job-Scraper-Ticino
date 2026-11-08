@@ -176,7 +176,7 @@ def _has_results(job: Job) -> bool:
 
 def _pending_indexes(jobs: list[Job], keys: list[str], retry_unanalyzable: bool) -> list[int]:
     pending = []
-    for index, (job, key) in enumerate(zip(jobs, keys)):
+    for index, (job, key) in enumerate(zip(jobs, keys, strict=True)):
         state = analysis_state(job, key)
         if state == "to_analyze" or (state == STATUS_UNANALYZABLE and retry_unanalyzable):
             pending.append(index)
@@ -200,8 +200,8 @@ def _create_openai_client() -> Any | None:
 
 
 def _print_analysis_start(jobs: list[Job], keys: list[str], pending_indexes: list[int]) -> None:
-    analyzed = sum(1 for job, key in zip(jobs, keys) if analysis_state(job, key) == STATUS_ANALYZED)
-    unanalyzable = sum(1 for job, key in zip(jobs, keys) if analysis_state(job, key) == STATUS_UNANALYZABLE)
+    analyzed = sum(1 for job, key in zip(jobs, keys, strict=True) if analysis_state(job, key) == STATUS_ANALYZED)
+    unanalyzable = sum(1 for job, key in zip(jobs, keys, strict=True) if analysis_state(job, key) == STATUS_UNANALYZABLE)
     stale = sum(1 for job in jobs if job.get(AI_STATUS) == STATUS_STALE)
     print(f"[LLM] {analyzed} up to date, {len(pending_indexes)} to analyze "
           f"({stale} because the profile or listing changed), {unanalyzable} not analyzable.")
@@ -428,7 +428,7 @@ def _validated_salary(raw_salary: Any, country: str) -> JsonObject | None:
     period = raw_salary.get("period")
     if isinstance(amount, bool) or not isinstance(amount, (int, float)):
         return None
-    if not math.isfinite(amount) or period not in PLAUSIBLE_RANGES or period == "hour":
+    if period not in PLAUSIBLE_RANGES or period == "hour" or not _is_finite_number(amount):
         return None
     expected_currency = _EXPECTED_CURRENCY.get(country)
     if currency not in ("CHF", "EUR") or (expected_currency and currency != expected_currency):
@@ -437,6 +437,13 @@ def _validated_salary(raw_salary: Any, country: str) -> JsonObject | None:
     if not lowest <= amount <= highest:
         return None
     return {"amount": round(float(amount)), "currency": currency, "period": period}
+
+
+def _is_finite_number(value: int | float) -> bool:
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def _apply_validated_result(job: Job, result: JsonObject, key: str) -> None:

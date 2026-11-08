@@ -156,7 +156,7 @@ def _set_status_from_sources(job: dict, source_outcomes: dict[str, str]) -> None
 
 
 def _unavailable_reason(sources: list[str], outcomes: list[str | None]) -> str:
-    for source, outcome in zip(sources, outcomes):
+    for source, outcome in zip(sources, outcomes, strict=True):
         if outcome is None:
             return f"{source} was not scanned in this run"
         if outcome != SOURCE_FULLY_SCANNED:

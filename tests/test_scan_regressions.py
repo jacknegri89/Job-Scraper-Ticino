@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import main
-from ai_analyzer import _apply_llm_result
+from ai_analyzer import _apply_validated_result, _validated_salary, validate_response
 from scrapers.jobs_ch import _add_new_jobs
 from scrapers.frontaliereticino_ch import _parse_date
 from scrapers.indeed_ch import _relative_to_date as indeed_date
@@ -34,10 +34,13 @@ def test_failed_source_keeps_cached_jobs(tmp_path, monkeypatch):
     monkeypatch.setattr(report, "save", lambda: None)
     new_job = job("good.ch", "https://good.ch/1", "New")
 
-    result = main._finish_scrape_run([new_job], [], "", True)
+    jobs = main._build_job_list([new_job], False)
+    result = main._finish_scrape_run(jobs, True)
 
     assert {item["title"] for item in result} == {"Old", "New"}
     assert len(json.loads(cache.read_text(encoding="utf-8"))) == 2
+    statuses = {item["title"]: item["status"] for item in result}
+    assert statuses == {"Old": "cached_source_unavailable", "New": "active"}
 
 
 def test_incomplete_scan_does_not_overwrite_cache(tmp_path, monkeypatch):
@@ -49,7 +52,7 @@ def test_incomplete_scan_does_not_overwrite_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "run_report", report)
     monkeypatch.setattr(report, "save", lambda: None)
 
-    result = main._finish_scrape_run([job("x", "https://x.ch/1", "New")], [], "", False)
+    result = main._finish_scrape_run([job("x", "https://x.ch/1", "New")], False)
 
     assert result is None
     assert cache.read_text(encoding="utf-8") == "original"
@@ -64,7 +67,7 @@ def test_scan_only_does_not_write_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "run_report", report)
     monkeypatch.setattr(report, "save", lambda: None)
 
-    main._finish_scrape_run([job("x", "https://x.ch/1", "New")], [], "", True, True)
+    main._finish_scrape_run([job("x", "https://x.ch/1", "New")], True, True)
 
     assert cache.read_text(encoding="utf-8") == "original"
 
@@ -79,7 +82,7 @@ def test_duplicate_page_does_not_stop_pagination():
 @pytest.mark.parametrize("value", [None, "false", 0, 1])
 def test_ai_suitability_requires_boolean(value):
     with pytest.raises(ValueError):
-        _apply_llm_result({}, {"suitable": value})
+        validate_response({"suitable": value}, "CH")
 
 
 def test_corrupt_cache_is_not_treated_as_empty(tmp_path, monkeypatch):
@@ -88,7 +91,7 @@ def test_corrupt_cache_is_not_treated_as_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "CACHE_FILE", cache)
 
     with pytest.raises(json.JSONDecodeError):
-        main._read_cache_or_empty()
+        main._read_previous_jobs()
     assert cache.read_text(encoding="utf-8") == "not valid json"
 
 
@@ -165,7 +168,7 @@ def test_incomplete_scan_only_does_not_report_success(monkeypatch):
     report = RunReport()
     monkeypatch.setattr(main, "run_report", report)
     monkeypatch.setattr(report, "save", lambda: None)
-    assert main._finish_scrape_run([], [], "", False, True) is None
+    assert main._finish_scrape_run([], False, True) is None
 
 
 def test_interruption_during_descriptions_keeps_downloaded_details(monkeypatch):
@@ -178,12 +181,13 @@ def test_interruption_during_descriptions_keeps_downloaded_details(monkeypatch):
         raw_jobs.append(first_job)
         return browser, context
 
-    def interrupt(_raw_jobs, valid_jobs, _context, _scan_only):
-        valid_jobs[0]["description"] = "Downloaded before interruption"
+    def interrupt(_context, jobs):
+        jobs[0]["description"] = "Downloaded before interruption"
         raise KeyboardInterrupt
 
     monkeypatch.setattr(main, "_scrape_selected_sites", collect)
-    monkeypatch.setattr(main, "_prepare_valid_jobs", interrupt)
+    monkeypatch.setattr(main, "_build_job_list", lambda raw_jobs, _scan_only: [dict(raw_jobs[0])])
+    monkeypatch.setattr(main, "_download_descriptions", interrupt)
     result, completed = main._collect_with_browser(None, [], False)
 
     assert completed is False
@@ -197,14 +201,11 @@ def test_unknown_site_among_valid_selections_is_rejected():
 
 @pytest.mark.parametrize("value", [float("inf"), float("nan"), -1, 10 ** 400])
 def test_invalid_salary_is_not_used(value):
-    result = {"suitable": True, "reason": "ok", "description": "text", "gross_salary": value}
-    item = {}
-    _apply_llm_result(item, result)
-    assert item["estimated_gross_salary_chf"] is None
+    assert _validated_salary({"amount": value, "currency": "CHF", "period": "month"}, "CH") is None
 
 
 def test_invalid_ai_text_does_not_partially_modify_job():
     item = {}
     with pytest.raises(ValueError):
-        _apply_llm_result(item, {"suitable": True, "reason": [], "description": "text"})
+        _apply_validated_result(item, {"suitable": True, "reason": [], "description": "text", "salary": None}, "key")
     assert item == {}

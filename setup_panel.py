@@ -13,24 +13,28 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import geo
 import startup_config
+from job_classifier import CONTRACT_TYPES, SENIORITY_LEVELS
+from job_filter import ALL_CATEGORIES
+from urllib.parse import parse_qs, urlsplit
 
 PROJECT_DIR = Path(__file__).resolve().parent
 PANEL_FILE = PROJECT_DIR / "setup_panel.html"
 LOG_FILE = PROJECT_DIR / "scraper.log"
 MAX_BODY_BYTES = 16384
 MAX_REQUESTS_PER_MINUTE = 30
+MAX_PLACE_QUERY_LENGTH = 80
 
 
 class LocalPanelServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, settings, cities, sources):
+    def __init__(self, settings, sources):
         super().__init__(("127.0.0.1", 0), PanelHandler)
         self.token = secrets.token_urlsafe(32)
         self.host = f"127.0.0.1:{self.server_port}"
         self.settings = settings
-        self.cities = cities
         self.sources = sources
         self.process = None
         self.lock = threading.Lock()
@@ -46,13 +50,13 @@ class LocalPanelServer(ThreadingHTTPServer):
             return "complete" if result == 0 else "error"
 
     def save(self, settings):
-        startup_config.validate_settings(settings, self.cities, self.sources)
+        startup_config.validate_settings(settings, self.sources)
         with self.lock:
             startup_config.save_settings(startup_config.SETTINGS_FILE, settings)
             self.settings = settings
 
     def start(self, settings):
-        startup_config.validate_settings(settings, self.cities, self.sources)
+        startup_config.validate_settings(settings, self.sources)
         if settings["ai_enabled"] and not os.environ.get("OPENAI_API_KEY"):
             raise ValueError("To use the AI analysis, set OPENAI_API_KEY and reopen the panel.")
         with self.lock:
@@ -104,15 +108,26 @@ class PanelHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._valid_host():
             return self.send_error(403)
-        if self.path == f"/{self.server.token}/status":
+        parts = urlsplit(self.path)
+        if parts.path == f"/{self.server.token}/status":
             return self._send_json(200, {"status": self.server.status()})
+        if parts.path == f"/{self.server.token}/place":
+            return self._serve_place_lookup(parts.query)
         if self.path != f"/{self.server.token}":
             return self.send_error(404)
         self._serve_panel()
 
+    def _serve_place_lookup(self, query):
+        if not self.server.allow_request():
+            return self._send_json(429, {"error": "Too many requests. Try again shortly."})
+        name = parse_qs(query).get("name", [""])[0].strip()[:MAX_PLACE_QUERY_LENGTH]
+        return self._send_json(200, place_lookup_result(name))
+
     def _serve_panel(self):
         data = {"token": self.server.token, "settings": self.server.settings,
-                "cities": sorted(self.server.cities), "sources": sorted(self.server.sources)}
+                "sources": sorted(self.server.sources), "regions": list(geo.ALL_REGIONS),
+                "categories": list(ALL_CATEGORIES), "seniority_levels": list(SENIORITY_LEVELS),
+                "contract_types": list(CONTRACT_TYPES)}
         encoded_data = json.dumps(data, ensure_ascii=True).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
         html = PANEL_FILE.read_text(encoding="utf-8").replace("__PANEL_DATA__", encoded_data)
         self._headers(200, "text/html; charset=utf-8")
@@ -180,8 +195,20 @@ class PanelHandler(BaseHTTPRequestHandler):
             return self._send_json(500, {"error": "The operation failed. Check the folder permissions."})
 
 
-def open_panel(settings, cities, sources):
-    server = LocalPanelServer(settings, cities, sources)
+def place_lookup_result(name):
+    """Coordinates of a place, so the user does not have to look them up by hand."""
+    location = geo.resolve_location(name)
+    if location.certainty == geo.CERTAINTY_EXACT:
+        place = location.place
+        return {"found": True, "name": place.name, "province": place.province,
+                "lat": place.lat, "lng": place.lng}
+    if location.certainty == geo.CERTAINTY_AMBIGUOUS:
+        return {"found": False, "error": "Several places share this name. Add the province, for example 'Bodio VA'."}
+    return {"found": False, "error": "Place not found in Lombardy or Ticino."}
+
+
+def open_panel(settings, sources):
+    server = LocalPanelServer(settings, sources)
     url = f"http://{server.host}/{server.token}"
     if sys.stdout is not None:
         print("Panel ready in your browser. Use 'Close panel' to stop it.")
