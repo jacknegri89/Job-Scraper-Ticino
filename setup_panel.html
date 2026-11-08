@@ -48,14 +48,13 @@
 
     .choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 4px 16px; }
     .choice { display: flex; align-items: center; gap: 10px; padding: 6px 0; cursor: pointer; }
-    #cities .choice { text-transform: capitalize; }
     input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--ink); flex: none; }
     label:not(.choice) { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2); margin: 12px 0 5px; }
-    input[type=text], input[type=number], textarea {
+    input[type=text], input[type=number], textarea, select {
       width: 100%; max-width: 100%; padding: 9px 11px; font: inherit; font-size: 14.5px;
       color: var(--ink); background: var(--paper); border: 1px solid var(--rule-2); border-radius: 3px;
     }
-    input:focus, textarea:focus { border-color: var(--ink); }
+    input:focus, textarea:focus, select:focus { border-color: var(--ink); }
     textarea { min-height: 96px; resize: vertical; font-family: var(--mono); font-size: 13.5px; }
     .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 4px 16px; }
 
@@ -81,32 +80,67 @@
 <main>
   <form id="settings-form">
     <section>
-      <fieldset><legend>Municipalities to include</legend><p class="hint">Select at least one municipality.</p><div class="choices" id="cities"></div></fieldset>
+      <fieldset><legend>Where to look</legend>
+        <p class="hint">Choose at least one region. Listings from other places are left out.</p>
+        <div class="choices" id="regions"></div>
+      </fieldset>
+      <label class="choice"><input type="checkbox" id="use-radius"> Only places within a distance of my starting point</label>
+      <div id="radius-fields" class="row">
+        <div><label for="radius">Distance in km (straight line)</label><input id="radius" type="number" min="1" max="300" step="1"></div>
+      </div>
+      <label for="places">Always include these places</label>
+      <textarea id="places" maxlength="4000" rows="2" aria-describedby="places-hint"></textarea>
+      <p class="hint" id="places-hint">Optional. One town or province code per line, for example Lugano or BS. These are included even when they are farther than the distance above.</p>
+      <label class="choice"><input type="checkbox" id="include-remote"> Also show fully remote listings</label>
+      <label class="choice"><input type="checkbox" id="include-uncertain"> Also show listings whose location is not precise</label>
+      <p class="hint">For example "Lombardia" or "Milan area". They are marked on the dashboard and get no distance.</p>
+    </section>
+    <section>
+      <fieldset><legend>Kind of work</legend><p class="hint">Select at least one field.</p><div class="choices" id="categories"></div></fieldset>
+      <fieldset><legend>Seniority</legend><p class="hint">Listings are kept unless you switch their level off. "Not stated" means the listing does not say.</p><div class="choices" id="seniority"></div></fieldset>
+      <fieldset><legend>Contract</legend><div class="choices" id="contracts"></div></fieldset>
     </section>
     <section>
       <fieldset><legend>Job sources</legend><p class="hint">Select at least one source.</p><div class="choices" id="sources"></div></fieldset>
     </section>
     <section>
-      <h2>jobs.ch search terms</h2>
+      <h2>Search terms</h2>
       <label for="terms">Search terms</label>
       <textarea id="terms" required maxlength="10000" aria-describedby="terms-hint"></textarea>
-      <p class="hint" id="terms-hint">One word or phrase per line. The other portals use their own search strategies.</p>
+      <p class="hint" id="terms-hint">One word or phrase per line. Used by the portals that accept a search term; the others use their own strategies.</p>
     </section>
     <section>
-      <h2>Distance</h2>
+      <h2>Starting point</h2>
       <label class="choice"><input type="checkbox" id="use-distance"> Show straight-line distance from home</label>
-      <div id="distance-fields" class="row">
-        <div><label for="home-city">Starting point</label><input id="home-city" type="text" maxlength="100"></div>
-        <div><label for="latitude">Latitude</label><input id="latitude" type="number" min="-90" max="90" step="any"></div>
-        <div><label for="longitude">Longitude</label><input id="longitude" type="number" min="-180" max="180" step="any"></div>
+      <div id="distance-fields">
+        <div class="row">
+          <div><label for="home-city">Town</label><input id="home-city" type="text" maxlength="100"></div>
+          <div><label for="latitude">Latitude</label><input id="latitude" type="number" min="-90" max="90" step="any"></div>
+          <div><label for="longitude">Longitude</label><input id="longitude" type="number" min="-180" max="180" step="any"></div>
+        </div>
+        <div class="actions"><button type="button" id="find-place">Find coordinates for this town</button></div>
+        <p class="hint" id="place-message" role="status" aria-live="polite">Type a town in Lombardy or Ticino and press the button. Coordinates are stored on this computer only.</p>
       </div>
-      <p class="hint">Enter coordinates in decimal degrees, for example 45.83 and 9.03. Distances are straight-line, not driving routes.</p>
     </section>
     <section>
       <h2>Optional AI analysis</h2>
       <label class="choice"><input type="checkbox" id="ai-enabled"> Rate each listing against my profile</label>
       <div id="ai-fields"><label for="profile">Professional profile</label><textarea id="profile" maxlength="3000"></textarea>
-        <p class="hint">Your profile and the listing data are sent to OpenAI. The OPENAI_API_KEY environment variable is required: the key is never entered or stored here. AI results already in the cache are not recalculated automatically.</p></div>
+        <p class="hint">Your profile and the listing data are sent to OpenAI. The OPENAI_API_KEY environment variable is required: the key is never entered or stored here. If you change the profile, listings are rated again on the next search.</p></div>
+    </section>
+    <section>
+      <h2>Freshness and exchange rate</h2>
+      <div class="row">
+        <div><label for="expiry">Mark as possibly expired after (days)</label><input id="expiry" type="number" min="1" max="365" step="1" required></div>
+        <div><label for="retention">Forget listings after (days)</label><input id="retention" type="number" min="1" max="365" step="1" required></div>
+        <div><label for="verify">Pages to re-check per search</label><input id="verify" type="number" min="0" max="100" step="1" required></div>
+      </div>
+      <div class="row">
+        <div><label for="fx-mode">Exchange rate CHF to EUR</label>
+          <select id="fx-mode"><option value="ecb">European Central Bank daily rate</option><option value="manual">A rate I enter</option></select></div>
+        <div id="fx-manual-field"><label for="fx-rate">EUR for 1 CHF</label><input id="fx-rate" type="number" min="0.5" max="2" step="0.0001"></div>
+      </div>
+      <p class="hint">The ECB rate is read from ecb.europa.eu once a day and shown with its date. If it cannot be reached, the rate you entered is used.</p>
     </section>
     <section>
       <h2>Run options</h2>
@@ -134,7 +168,17 @@ const statusText = document.getElementById("status");
 let statusTimer;
 const byId = id => document.getElementById(id);
 
-function addChoices(containerId, values, selected) {
+const LABELS = {
+  regions: {LOM: "Lombardy", TI: "Ticino"},
+  categories: {tech: "Software, systems and AI", technical: "Electronics and machining", logistics: "Logistics",
+    production: "Production", food_service: "Food service", cleaning: "Cleaning", retail: "Retail",
+    transport: "Transport", other: "Other"},
+  seniority: {junior: "Junior", mid: "Mid-level", senior: "Senior", manager: "Manager", unknown: "Not stated"},
+  contracts: {permanent: "Permanent", fixed_term: "Fixed term", apprenticeship: "Apprenticeship",
+    internship: "Internship", freelance: "Freelance", temp_agency: "Through an agency", unknown: "Not stated"}
+};
+
+function addChoices(containerId, values, selectedValues, labels) {
   const container = byId(containerId);
   for (const value of values) {
     const label = document.createElement("label");
@@ -142,46 +186,80 @@ function addChoices(containerId, values, selected) {
     const input = document.createElement("input");
     input.type = "checkbox";
     input.value = value;
-    input.checked = selected.includes(value);
-    label.append(input, document.createTextNode(value));
+    input.checked = selectedValues.includes(value);
+    let text = value;
+    if (labels && labels[value]) {
+      text = labels[value];
+    }
+    label.append(input, document.createTextNode(text));
     container.appendChild(label);
   }
 }
 
 function toggleFields() {
-  byId("distance-fields").hidden = !byId("use-distance").checked;
-  byId("latitude").required = byId("use-distance").checked;
-  byId("longitude").required = byId("use-distance").checked;
+  const useDistance = byId("use-distance").checked;
+  const useRadius = byId("use-radius").checked;
+  byId("distance-fields").hidden = !(useDistance || useRadius);
+  byId("radius-fields").hidden = !useRadius;
+  byId("radius").required = useRadius;
+  byId("latitude").required = useDistance || useRadius;
+  byId("longitude").required = useDistance || useRadius;
   byId("ai-fields").hidden = !byId("ai-enabled").checked;
+  byId("fx-manual-field").hidden = byId("fx-mode").value !== "manual";
+  byId("fx-rate").required = byId("fx-mode").value === "manual";
 }
 
 function selected(containerId) {
   return Array.from(byId(containerId).querySelectorAll("input:checked"), input => input.value);
 }
 
+function splitLines(text) {
+  return text.split(/[\n,]+/).map(value => value.trim()).filter(Boolean);
+}
+
 function collectSettings() {
-  const cities = selected("cities");
+  const regions = selected("regions");
+  const categories = selected("categories");
+  const seniority = selected("seniority");
+  const contracts = selected("contracts");
   const sources = selected("sources");
-  const terms = byId("terms").value.split(/[\n,]+/).map(value => value.trim()).filter(Boolean);
-  if (!cities.length || !sources.length || !terms.length) {
-    throw new Error("Select at least one municipality, one source and one search term.");
+  const terms = splitLines(byId("terms").value);
+  if (!regions.length || !categories.length || !seniority.length || !contracts.length || !sources.length || !terms.length) {
+    throw new Error("Select at least one region, field, seniority level, contract, source and search term.");
   }
-  // Without distance, no home point is sent and the dashboard hides distances.
+  // Without a starting point no home is sent and the dashboard hides distances.
+  const needsHome = byId("use-distance").checked || byId("use-radius").checked;
   let homeCity = "";
   let homeLat = null;
   let homeLng = null;
-  if (byId("use-distance").checked) {
+  if (needsHome) {
     homeCity = byId("home-city").value.trim();
     homeLat = Number(byId("latitude").value);
     homeLng = Number(byId("longitude").value);
   }
+  let radius = null;
+  if (byId("use-radius").checked) {
+    radius = Number(byId("radius").value);
+  }
+  let manualRate = null;
+  if (byId("fx-rate").value !== "") {
+    manualRate = Number(byId("fx-rate").value);
+  }
   return {
-    cities, sources, search_terms: terms,
+    schema_version: data.settings.schema_version,
+    regions, radius_km: radius, include_places: splitLines(byId("places").value),
+    include_uncertain_location: byId("include-uncertain").checked,
+    include_remote: byId("include-remote").checked,
+    categories, seniority_levels: seniority, contract_types: contracts,
+    sources, search_terms: terms,
     home_city: homeCity, home_lat: homeLat, home_lng: homeLng,
     ai_enabled: byId("ai-enabled").checked,
     candidate_profile: byId("profile").value.trim(),
     headless: true,
-    timeout_ms: Number(byId("timeout").value), attempts: Number(byId("attempts").value)
+    timeout_ms: Number(byId("timeout").value), attempts: Number(byId("attempts").value),
+    expiry_days: Number(byId("expiry").value), retention_days: Number(byId("retention").value),
+    verify_limit: Number(byId("verify").value),
+    fx_mode: byId("fx-mode").value, fx_manual_eur_per_chf: manualRate
   };
 }
 
@@ -198,7 +276,9 @@ async function send(action) {
       body: JSON.stringify(settings)
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "The operation failed.");
+    if (!response.ok) {
+      throw new Error(result.error || "The operation failed.");
+    }
     message.textContent = "Settings saved.";
     if (action === "start") {
       message.textContent = "Search started in the background.";
@@ -207,6 +287,29 @@ async function send(action) {
   } catch (error) {
     message.className = "error";
     message.textContent = error.message || "The operation failed.";
+  }
+}
+
+async function findPlace() {
+  const placeMessage = byId("place-message");
+  const name = byId("home-city").value.trim();
+  if (!name) {
+    placeMessage.textContent = "Type a town first.";
+    return;
+  }
+  try {
+    const response = await fetch(`/${data.token}/place?name=${encodeURIComponent(name)}`, {cache: "no-store"});
+    const result = await response.json();
+    if (!result.found) {
+      placeMessage.textContent = result.error || "Place not found.";
+      return;
+    }
+    byId("home-city").value = result.name;
+    byId("latitude").value = result.lat;
+    byId("longitude").value = result.lng;
+    placeMessage.textContent = `Found ${result.name} (${result.province}). Coordinates filled in.`;
+  } catch (_) {
+    placeMessage.textContent = "The lookup failed. Enter the coordinates by hand.";
   }
 }
 
@@ -222,19 +325,35 @@ async function refreshStatus() {
   }
 }
 
-addChoices("cities", data.cities, data.settings.cities);
-addChoices("sources", data.sources, data.settings.sources);
-byId("terms").value = data.settings.search_terms.join("\n");
-byId("use-distance").checked = data.settings.home_lat !== null;
-byId("home-city").value = data.settings.home_city;
-byId("latitude").value = data.settings.home_lat ?? "";
-byId("longitude").value = data.settings.home_lng ?? "";
-byId("ai-enabled").checked = data.settings.ai_enabled;
-byId("profile").value = data.settings.candidate_profile;
-byId("timeout").value = data.settings.timeout_ms;
-byId("attempts").value = data.settings.attempts;
-byId("use-distance").addEventListener("change", toggleFields);
-byId("ai-enabled").addEventListener("change", toggleFields);
+const saved = data.settings;
+addChoices("regions", data.regions, saved.regions, LABELS.regions);
+addChoices("categories", data.categories, saved.categories, LABELS.categories);
+addChoices("seniority", data.seniority_levels, saved.seniority_levels, LABELS.seniority);
+addChoices("contracts", data.contract_types, saved.contract_types, LABELS.contracts);
+addChoices("sources", data.sources, saved.sources, null);
+byId("use-radius").checked = saved.radius_km !== null;
+byId("radius").value = saved.radius_km ?? "";
+byId("places").value = saved.include_places.join("\n");
+byId("include-uncertain").checked = saved.include_uncertain_location;
+byId("include-remote").checked = saved.include_remote;
+byId("terms").value = saved.search_terms.join("\n");
+byId("use-distance").checked = saved.home_lat !== null;
+byId("home-city").value = saved.home_city;
+byId("latitude").value = saved.home_lat ?? "";
+byId("longitude").value = saved.home_lng ?? "";
+byId("ai-enabled").checked = saved.ai_enabled;
+byId("profile").value = saved.candidate_profile;
+byId("expiry").value = saved.expiry_days;
+byId("retention").value = saved.retention_days;
+byId("verify").value = saved.verify_limit;
+byId("fx-mode").value = saved.fx_mode;
+byId("fx-rate").value = saved.fx_manual_eur_per_chf ?? "";
+byId("timeout").value = saved.timeout_ms;
+byId("attempts").value = saved.attempts;
+for (const id of ["use-distance", "use-radius", "ai-enabled", "fx-mode"]) {
+  byId(id).addEventListener("change", toggleFields);
+}
+byId("find-place").addEventListener("click", findPlace);
 form.addEventListener("submit", event => { event.preventDefault(); send("start"); });
 byId("save").addEventListener("click", () => send("save"));
 byId("close").addEventListener("click", async () => {

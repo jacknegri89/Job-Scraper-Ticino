@@ -22,6 +22,10 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+# Search area for portals that take a place and a radius. Set by main.py from the saved settings.
+SEARCH_PLACE = ""
+SEARCH_RADIUS_KM = None
+
 HEADLESS        = _env_bool("SCRAPER_HEADLESS", False)
 PAGE_TIMEOUT_MS = _env_int("SCRAPER_TIMEOUT_MS", 30_000)
 MAX_ATTEMPTS    = max(1, min(_env_int("SCRAPER_ATTEMPTS", 2), 3))

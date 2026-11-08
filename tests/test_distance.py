@@ -1,4 +1,4 @@
-"""Tests for configurable home-to-city distance calculations."""
+"""Tests for configurable home-to-place distance calculations."""
 
 import importlib
 import sys
@@ -8,6 +8,8 @@ from types import ModuleType
 from pytest import MonkeyPatch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+import geo
 
 
 def load_distance_module(
@@ -30,36 +32,23 @@ def load_distance_module(
 
 
 def test_distance_uses_configured_home_coordinates(monkeypatch: MonkeyPatch) -> None:
-    distance = load_distance_module(
-        monkeypatch,
-        home_lat=45.8320,
-        home_lng=9.0310,
-    )
+    chiasso = geo.find_place("Chiasso").place
+    distance = load_distance_module(monkeypatch, home_lat=chiasso.lat, home_lng=chiasso.lng)
 
     assert distance.km_from_home("Chiasso") == 0.0
     assert distance.km_from_home("Mendrisio") > 0
 
 
-def test_chiasso_distance_from_neutral_home_is_plausible(
-    monkeypatch: MonkeyPatch,
-) -> None:
+def test_distance_works_for_lombardy_and_ticino(monkeypatch: MonkeyPatch) -> None:
     distance = load_distance_module(monkeypatch)
 
-    km = distance.km_from_home("Chiasso")
-
-    assert km is not None
-    assert 92 <= km <= 93
-
-
-def test_riva_san_vitale_is_farther_than_chiasso(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    distance = load_distance_module(monkeypatch)
-
-    assert distance.km_from_home("Riva San Vitale") > distance.km_from_home("Chiasso")
+    milan_km = distance.km_from_home("Milano MI")
+    chiasso_km = distance.km_from_home("Chiasso")
+    assert 45 <= milan_km <= 60
+    assert 90 <= chiasso_km <= 95
 
 
-def test_accepts_portal_city_variants(monkeypatch: MonkeyPatch) -> None:
+def test_accepts_portal_place_variants(monkeypatch: MonkeyPatch) -> None:
     distance = load_distance_module(monkeypatch)
 
     assert distance.km_from_home("6850 Mendrisio") == distance.km_from_home("Mendrisio")
@@ -67,28 +56,24 @@ def test_accepts_portal_city_variants(monkeypatch: MonkeyPatch) -> None:
     assert distance.km_from_home("Balerna TI") == distance.km_from_home("Balerna")
 
 
-def test_unknown_city_returns_none(monkeypatch: MonkeyPatch) -> None:
+def test_generic_unknown_and_empty_locations_have_no_distance(monkeypatch: MonkeyPatch) -> None:
     distance = load_distance_module(monkeypatch)
 
-    assert distance.km_from_home("Zurich") is None
+    assert distance.km_from_home("Lombardia") is None
+    assert distance.km_from_home("Provincia di Varese") is None
+    assert distance.km_from_home("Cittanonesistente") is None
     assert distance.km_from_home("") is None
     assert distance.km_from_home(None) is None
 
 
-def test_all_allowed_cities_have_coordinates(monkeypatch: MonkeyPatch) -> None:
+def test_ambiguous_place_name_has_no_distance(monkeypatch: MonkeyPatch) -> None:
     distance = load_distance_module(monkeypatch)
 
-    from job_filter import ALLOWED_CITIES
-
-    missing_cities = [
-        city for city in ALLOWED_CITIES if distance.km_from_home(city) is None
-    ]
-    assert missing_cities == []
+    assert distance.km_from_home("Bodio") is None
+    assert distance.km_from_home("Bodio TI") is not None
 
 
-def test_existing_dashboard_api_matches_english_api(
-    monkeypatch: MonkeyPatch,
-) -> None:
+def test_existing_dashboard_api_matches_english_api(monkeypatch: MonkeyPatch) -> None:
     distance = load_distance_module(monkeypatch)
 
     assert distance.km_da_casa("Chiasso") == distance.km_from_home("Chiasso")

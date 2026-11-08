@@ -1,8 +1,10 @@
-"""Offline great-circle distances from the configured home point."""
+"""Offline great-circle distances from the configured home point.
 
-from math import asin, cos, radians, sin, sqrt
+A distance is only given for an exact place. Generic text such as "Lombardia" or a
+name shared by several places gets no distance.
+"""
 
-from job_filter import normalize_city
+import geo
 
 try:
     from user_config import HOME_CITY, HOME_LAT, HOME_LNG
@@ -21,33 +23,6 @@ if HOME_LAT is not None and HOME_LNG is not None:
     HOME_LAT = float(HOME_LAT)
     HOME_LNG = float(HOME_LNG)
     _HOME_COORDINATES = (HOME_LAT, HOME_LNG)
-_EARTH_RADIUS_KM = 6371.0
-
-_CITY_COORDINATES: dict[str, tuple[float, float]] = {
-    "chiasso": (45.8320, 9.0310),
-    "mendrisio": (45.8703, 8.9817),
-    "stabio": (45.8487, 8.9367),
-    "balerna": (45.8460, 9.0080),
-    "coldrerio": (45.8530, 9.0040),
-    "morbio inferiore": (45.8490, 9.0150),
-    "novazzano": (45.8400, 8.9810),
-    "riva san vitale": (45.9010, 8.9710),
-}
-
-
-def _haversine_km(
-    origin: tuple[float, float],
-    destination: tuple[float, float],
-) -> float:
-    origin_lat, origin_lng = map(radians, origin)
-    destination_lat, destination_lng = map(radians, destination)
-    delta_lat = destination_lat - origin_lat
-    delta_lng = destination_lng - origin_lng
-    half_chord = (
-        sin(delta_lat / 2) ** 2
-        + cos(origin_lat) * cos(destination_lat) * sin(delta_lng / 2) ** 2
-    )
-    return 2 * _EARTH_RADIUS_KM * asin(sqrt(half_chord))
 
 
 def is_home_configured() -> bool:
@@ -55,13 +30,15 @@ def is_home_configured() -> bool:
     return _HOME_COORDINATES is not None
 
 
-def km_from_home(city_raw: str | None) -> float | None:
-    """Return the distance from home to a supported city, in kilometers."""
-    city = normalize_city(city_raw or "")
-    coordinates = _CITY_COORDINATES.get(city)
-    if coordinates is None or _HOME_COORDINATES is None:
+def km_from_home(city_raw: str | None, country_hint: str = "") -> float | None:
+    """Return the distance from home to an exactly known place, in kilometers."""
+    if _HOME_COORDINATES is None:
         return None
-    return round(_haversine_km(_HOME_COORDINATES, coordinates), 1)
+    location = geo.resolve_location(city_raw or "", country_hint)
+    if location.certainty != geo.CERTAINTY_EXACT:
+        return None
+    place = location.place
+    return round(geo.haversine_km(_HOME_COORDINATES, (place.lat, place.lng)), 1)
 
 
 def km_da_casa(city_raw: str | None) -> float | None:

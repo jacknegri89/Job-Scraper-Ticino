@@ -1,27 +1,29 @@
-"""Filtering and normalization helpers for scraped jobs."""
+"""Search terms, field categories, URL safety and date helpers for scraped jobs.
+
+Where a job is, whether it is a duplicate and whether the user wants it is decided in
+job_pipeline.py. This module holds the small reusable pieces.
+"""
 
 import re
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-ALLOWED_CITIES = {
-    "chiasso",
-    "mendrisio",
-    "stabio",
-    "balerna",
-    "coldrerio",
-    "morbio inferiore",
-    "novazzano",
-    "riva san vitale",
-}
-
 # These are external portal search terms. They stay in Italian because they
-# produce better results on Swiss Italian job boards.
+# produce better results on Italian and Swiss Italian job boards.
 SEARCH_TERMS = [
     "operaio",
     "magazziniere",
     "tecnico",
     "addetto",
     "informatico",
+    "sviluppatore",
+    "programmatore",
+    "sistemista",
+    "developer",
+    "software engineer",
+    "devops",
+    "data scientist",
+    "machine learning",
+    "intelligenza artificiale",
     "cablatore",
     "cameriere",
     "commesso",
@@ -40,17 +42,34 @@ SEARCH_TERMS = [
     "elektriker",
 ]
 
+CATEGORY_TECH = "tech"
+CATEGORY_TECHNICAL = "technical"
+CATEGORY_OTHER = "other"
+
 KEYWORDS = {
-    "tech": [
-        "Junior IT", "Help Desk", "Helpdesk", "IT Support",
-        "Tecnico informatico", "Tecnico IT", "Operatore informatico",
-        "Sviluppatore Junior", "Sistemista", "Tecnico reti",
-        "Network technician", "Tecnico hardware", "Tecnico software",
+    # Software, systems, support and AI/data roles.
+    CATEGORY_TECH: [
+        "Junior IT", "Help Desk", "Helpdesk", "Service Desk", "IT Support", "Supporto IT",
+        "Tecnico informatico", "Tecnico IT", "Operatore informatico", "Informatico",
+        "Sviluppatore", "Developer", "Programmatore", "Software Engineer", "Software Developer",
+        "Full Stack", "Fullstack", "Frontend", "Front-end", "Backend", "Back-end",
+        "Web Developer", "Analista programmatore", "Analista funzionale",
+        "Sistemista", "System Administrator", "Sysadmin", "Amministratore di sistema",
+        "DevOps", "Cloud Engineer", "Network Engineer", "Network technician", "Tecnico reti",
+        "Tecnico hardware", "Tecnico software", "Security Engineer", "Cybersecurity",
+        "Sicurezza informatica", "Database Administrator", "DBA", "QA Engineer", "Tester",
+        "Data Scientist", "Data Engineer", "Data Analyst", "Machine Learning", "AI Engineer",
+        "Intelligenza artificiale", "Artificial Intelligence", "Python", "Java", "C#", ".NET",
+        "Sviluppo software", "IoT", "Raspberry",
+    ],
+    # Electronics, electrical and machining roles that used to sit under "tech".
+    CATEGORY_TECHNICAL: [
         "Operaio elettronico", "Cablatore", "Cablaggio",
         "Tecnico elettronico", "Assemblatore elettronico",
         "Montatore elettronico", "Tecnico di laboratorio",
-        "IoT", "Raspberry", "Elettrotecnico",
-        "Operatore CNC", "Programmatore CNC", "Operatore macchine utensili",
+        "Elettrotecnico",
+        "Programmatore CNC", "Programmatore macchine", "Operatore CNC", "Controllo numerico",
+        "Operatore macchine utensili",
         "Elettricista", "Tecnico elettrico", "Installatore elettrico",
     ],
     "logistics": [
@@ -102,123 +121,97 @@ KEYWORDS = {
     ],
 }
 
+ALL_CATEGORIES = tuple(KEYWORDS) + (CATEGORY_OTHER,)
+
 AGENCY_SOURCES = {
     "randstad.ch",
     "orienta.ch",
     "gigroup.ch",
     "adecco.ch",
     "manpower.ch",
+    "randstad.it",
+    "gigroup.it",
+    "adecco.it",
+    "manpower.it",
 }
 
+TRACKING_PARAMETERS = frozenset({
+    "gclid", "fbclid", "msclkid", "ref", "refid", "trk", "trackingid", "tracking", "src", "source",
+})
 ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 EU_DATE = re.compile(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})")
+DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
-def normalize_city(city_raw: str | None) -> str:
-    """Normalize the different city formats returned by job portals."""
-    city = city_raw or ""
-    if " - " in city:
-        city = city.split(" - ")[-1].strip()
-    city = re.split(r"[,\(]", city)[0].strip()
-    city = re.sub(r"^\d{4,5}\s+", "", city)
-    city = re.sub(r"\s+(?:TI|CH)$", "", city, flags=re.IGNORECASE)
-    return city.strip().lower()
+def _keyword_pattern(keyword: str) -> re.Pattern:
+    """Match a keyword only as a whole word, so 'AI' does not match 'assistant'."""
+    return re.compile(r"(?<!\w)" + re.escape(keyword.lower()) + r"(?!\w)")
+
+
+_CATEGORY_PATTERNS = {
+    category: [_keyword_pattern(keyword) for keyword in keywords]
+    for category, keywords in KEYWORDS.items()
+}
+_CATEGORY_PATTERNS["tech"].append(re.compile(r"(?<!\w)ai(?!\w)"))
+
+
+# "Business Developer" and similar are sales roles, not software roles.
+_NOT_SOFTWARE = re.compile(r"business develop|sviluppo commerciale|sviluppatore commerciale|sviluppo business")
+
+
+# Machining and electrical titles are checked before software ones: "Programmatore CNC"
+# is a machinist, not a developer.
+_CATEGORY_ORDER = (CATEGORY_TECHNICAL, *(name for name in KEYWORDS if name != CATEGORY_TECHNICAL))
+
+
+def categorize_job(title: str) -> str:
+    """Assign a broad category from the job title."""
+    title_lower = (title or "").lower()
+    for category in _CATEGORY_ORDER:
+        if category == CATEGORY_TECH and _NOT_SOFTWARE.search(title_lower):
+            continue
+        if any(pattern.search(title_lower) for pattern in _CATEGORY_PATTERNS[category]):
+            return category
+    return CATEGORY_OTHER
 
 
 def normalize_url(url: str) -> str:
-    """Remove tracking query parameters before URL comparisons."""
+    """Canonical form of a URL: no tracking parameters, fragment or default port."""
     parsed_url = urlparse(url)
     query_params = parse_qs(parsed_url.query, keep_blank_values=False)
     clean_params = {
         key: value
         for key, value in query_params.items()
-        if not key.startswith("utm_")
+        if not key.lower().startswith("utm_") and key.lower() not in TRACKING_PARAMETERS
     }
     clean_query = urlencode(sorted(clean_params.items()), doseq=True)
-    return urlunparse(parsed_url._replace(query=clean_query))
+    host = (parsed_url.hostname or "").lower()
+    netloc = host
+    if parsed_url.port is not None and parsed_url.port != DEFAULT_PORTS.get(parsed_url.scheme):
+        netloc = f"{host}:{parsed_url.port}"
+    path = parsed_url.path.rstrip("/") or parsed_url.path
+    return urlunparse((parsed_url.scheme.lower(), netloc, path, "", clean_query, ""))
 
 
-def is_valid_job(job: dict) -> bool:
-    """Return True when a job is in the supported Swiss border area."""
-    url = job.get("url", "")
+def is_safe_job_url(url: object) -> bool:
+    """Accept only plain http(s) URLs with a host and no embedded credentials."""
     if not isinstance(url, str):
         return False
     try:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https") or not parsed.hostname:
             return False
-        if parsed.username is not None or parsed.password is not None:
-            return False
+        return parsed.username is None and parsed.password is None
     except ValueError:
         return False
-    if _is_italian_portal(url):
-        return False
-    return normalize_city(job.get("city", "")) in ALLOWED_CITIES
 
 
-def categorize_job(title: str) -> str:
-    """Assign a broad category from the job title."""
-    title_lower = title.lower()
-    for category, keywords in KEYWORDS.items():
-        if _has_keyword(title_lower, keywords):
-            return category
-    return "other"
-
-
-def filter_jobs(jobs: list[dict]) -> list[dict]:
-    """Filter, deduplicate, and sort jobs by newest date first."""
-    seen_urls: set[str] = set()
-    seen_content: set[str] = set()
-    deduped_jobs: list[dict] = []
-    for job in jobs:
-        if is_valid_job(job):
-            _add_unique_job(job, seen_urls, seen_content, deduped_jobs)
-    return sorted(deduped_jobs, key=_sort_date, reverse=True)
-
-
-def _has_keyword(title_lower: str, keywords: list[str]) -> bool:
-    return any(keyword.lower() in title_lower for keyword in keywords)
-
-
-def _is_italian_portal(url: str) -> bool:
-    return (urlparse(url).hostname or "").rstrip(".").lower().endswith(".it")
-
-
-def _add_unique_job(job: dict, seen_urls: set[str], seen_content: set[str], deduped_jobs: list[dict]) -> None:
-    job_url = job.get("url", "")
-    if not job_url:
-        return
-    url_key = normalize_url(job_url)
-    content_key = _content_key(job)
-    if url_key in seen_urls or content_key in seen_content:
-        return
-    seen_urls.add(url_key)
-    seen_content.add(content_key)
-    deduped_jobs.append(job)
-
-
-def _content_key(job: dict) -> str:
-    title_key = _compact(job.get("title", ""))[:40]
-    company_key = _compact(job.get("company", ""))[:25]
-    city_key = normalize_city(job.get("city", ""))
-    if not company_key:
-        return f"{title_key}|{city_key}|{normalize_url(job.get('url', ''))}"
-    if job.get("source") in AGENCY_SOURCES:
-        url_tail = _compact(job.get("url", ""))[-18:]
-        return f"{title_key}|{company_key}|{city_key}|{url_tail}"
-    return f"{title_key}|{company_key}|{city_key}"
-
-
-def _compact(value: str) -> str:
-    return re.sub(r"\W+", "", value).lower()
-
-
-def _sort_date(job: dict) -> str:
-    """Convert supported date formats to YYYY-MM-DD for sorting."""
-    date_text = job.get("date", "").strip()
-    if ISO_DATE.match(date_text):
-        return date_text[:10]
-    match = EU_DATE.match(date_text)
+def sort_date(date_text: str | None) -> str:
+    """Convert supported date formats to YYYY-MM-DD, or '' when the date is unknown."""
+    text = (date_text or "").strip()
+    if ISO_DATE.match(text):
+        return text[:10]
+    match = EU_DATE.match(text)
     if match:
         return f"{match.group(3)}-{int(match.group(2)):02d}-{int(match.group(1)):02d}"
     return ""

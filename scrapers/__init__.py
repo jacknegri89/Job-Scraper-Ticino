@@ -54,6 +54,7 @@ DESCRIPTION_HOSTS = frozenset({
     "www.jobs.ch", "www.carriera.ch", "ch.gigroup.com", "www.randstad.ch",
     "www.orienta.ch", "www.jobscout24.ch", "ch.indeed.com", "www.adecco.com",
     "www.manpower.ch", "frontaliereticino.ch", "www.linkedin.com",
+    "it.indeed.com", "it.linkedin.com",
 })
 
 
@@ -243,6 +244,9 @@ def fetch_description(context: BrowserContext, url: str, max_chars: int = 3000) 
         description_context = context.browser.new_context(java_script_enabled=False, service_workers="block")
         page = _open_description_page(description_context, url)
         clean_text = _clean_description_text(_description_text(page))
+        if detect_block_reason(page) or looks_like_block_page(clean_text):
+            print("  [DESC] The portal showed a block page; no description saved")
+            return empty
         return _description_result(clean_text, max_chars)
     except Exception as e:
         print(f"  [DESC] error on {url[:60]}: {type(e).__name__}")
@@ -251,6 +255,77 @@ def fetch_description(context: BrowserContext, url: str, max_chars: int = 3000) 
         _close_page(page)
         if description_context:
             description_context.close()
+
+
+_EXPIRED_MARKERS = (
+    "no longer available", "no longer active", "has expired", "job expired", "not found",
+    "non è più disponibile", "non e più disponibile", "annuncio scaduto", "offerta scaduta",
+    "annuncio non trovato", "nicht mehr verfügbar", "stelle nicht gefunden",
+)
+_VERDICT_AVAILABLE = "available"
+_VERDICT_GONE = "gone"
+_VERDICT_UNKNOWN = "unknown"
+_GONE_STATUS_CODES = (404, 410)
+_TEXT_CHARS_CHECKED = 4000
+
+
+def check_listing(context: BrowserContext, url: str) -> str:
+    """Open a listing page and say 'available', 'gone' or 'unknown'. Never raises.
+
+    'gone' needs proof: a 404/410 answer or an explicit "no longer available" text.
+    Redirects elsewhere, blocks and errors are 'unknown', never 'gone'.
+    """
+    if not _valid_description_url(url):
+        return _VERDICT_UNKNOWN
+    check_context = None
+    page = None
+    try:
+        check_context = context.browser.new_context(java_script_enabled=False, service_workers="block")
+        page = check_context.new_page()
+        page.route("**/*", _filter_description_request)
+        response = page.goto(url, wait_until="domcontentloaded", timeout=20000)
+        if response is None:
+            return _VERDICT_UNKNOWN
+        return _listing_verdict(page, response.status, url)
+    except Exception:
+        return _VERDICT_UNKNOWN
+    finally:
+        _close_page(page)
+        if check_context:
+            check_context.close()
+
+
+def _listing_verdict(page: Page, status_code: int, original_url: str) -> str:
+    if status_code in _GONE_STATUS_CODES:
+        return _VERDICT_GONE
+    if not 200 <= status_code < 300:
+        return _VERDICT_UNKNOWN
+    text = page.evaluate("() => document.body ? document.body.innerText : ''")[:_TEXT_CHARS_CHECKED].lower()
+    if any(marker in text for marker in _EXPIRED_MARKERS):
+        return _VERDICT_GONE
+    if _same_page(page.url, original_url):
+        return _VERDICT_AVAILABLE
+    return _VERDICT_UNKNOWN
+
+
+def _same_page(final_url: str, original_url: str) -> bool:
+    final_parts = urlsplit(final_url)
+    original_parts = urlsplit(original_url)
+    return (final_parts.hostname == original_parts.hostname
+            and final_parts.path.rstrip("/") == original_parts.path.rstrip("/"))
+
+
+_BLOCK_TEXT_MARKERS = (
+    "your request has been blocked", "access denied", "verify you are human", "unusual traffic",
+    "pardon our interruption", "are you a robot", "non sono un robot", "captcha",
+)
+_BLOCK_TEXT_MAX_LENGTH = 600
+
+
+def looks_like_block_page(text: str) -> bool:
+    """A short text that is an anti-bot message must never be stored as a job description."""
+    lowered = (text or "").lower()
+    return len(lowered) <= _BLOCK_TEXT_MAX_LENGTH and any(marker in lowered for marker in _BLOCK_TEXT_MARKERS)
 
 
 def _valid_description_url(url: str) -> bool:
@@ -319,6 +394,12 @@ def _clean_description_text(description_text: str) -> str:
 def _description_result(clean_text: str, max_chars: int) -> dict[str, str]:
     # Extract email from the full text before truncating the description.
     return {"description": clean_text[:max_chars], "email": extract_email(clean_text)}
+
+
+def detect_block_reason(page: Page) -> str | None:
+    from scrapers.page_guard import detect_block
+
+    return detect_block(page)
 
 
 def _close_page(page: Page | None) -> None:

@@ -3,7 +3,9 @@
 # Possible statuses:
 #   ok                    jobs collected, no issue
 #   ok_partial            jobs collected, but part of the site is inaccessible
-#   empty                 site reachable but no jobs collected
+#   no_results            the site answered and says there are no matching listings
+#   empty                 no jobs read and no proof that the page was understood
+#                         (could be a real empty search or a changed page)
 #   requires_auth         content behind login
 #   requires_manual_login manual session needed: python main.py --auth <site>
 #   blocked               captcha / anti-bot
@@ -17,7 +19,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -36,6 +38,19 @@ class SiteResult:
     reason:     str = ""
     final_url:  str = ""
     screenshot: str = ""
+    valid:      int = 0
+    duplicates: int = 0
+    excluded:   dict = field(default_factory=dict)
+
+
+# Statuses that prove the site was read correctly.
+READ_OK_STATUSES = ("ok", "no_results")
+# Statuses where some data was read or the page was at least understood.
+USABLE_STATUSES = ("ok", "ok_partial", "no_results")
+
+OVERALL_SUCCESS = "success"
+OVERALL_PARTIAL = "partial"
+OVERALL_FAILURE = "failure"
 
 
 class RunReport:
@@ -64,14 +79,33 @@ class RunReport:
         self._results[site] = r
         return r
 
+    def add_job_stats(self, site: str, collected: int, valid: int, duplicates: int, excluded: dict) -> None:
+        """Attach the filtering numbers of one site to its result."""
+        result = self._results.get(site)
+        if result is None:
+            return
+        result.jobs = collected
+        result.valid = valid
+        result.duplicates = duplicates
+        result.excluded = dict(excluded)
+
     @property
     def results(self) -> list[SiteResult]:
         return list(self._results.values())
+
+    def overall_status(self) -> str:
+        """success: every site was read. partial: some were. failure: none was.
+
+        A site that returned nothing without proof that its page was understood
+        ("empty") never counts as read, so two portals answering is not a success.
+        """
+        return overall_status(self.results)
 
     def save(self, path: Path = REPORT_FILE) -> None:
         data = {
             "started":  self.started.isoformat(timespec="seconds"),
             "finished": datetime.now().isoformat(timespec="seconds"),
+            "overall":  self.overall_status(),
             "sites":    [asdict(r) for r in self.results],
         }
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -80,17 +114,31 @@ class RunReport:
     def print_table(self) -> None:
         if not self._results:
             return
-        W_SITE, W_STAT = 24, 22
-        print("\n" + "=" * 78)
-        print(f"  {'SITE':<{W_SITE}}{'STATUS':<{W_STAT}}{'JOBS':>5}  {'TIME':>7}  NOTE")
-        print("-" * 78)
+        width_site, width_status = 22, 16
+        line = "=" * 92
+        print("\n" + line)
+        print(f"  {'SITE':<{width_site}}{'STATUS':<{width_status}}{'READ':>5}{'VALID':>7}{'DUPES':>7}{'OUT':>5}  {'TIME':>6}  NOTE")
+        print("-" * 92)
         for r in self.results:
-            note = r.reason[:40] if r.reason else ""
-            print(f"  {r.site:<{W_SITE}}{r.status:<{W_STAT}}{r.jobs:>5}"
-                  f"  {r.duration_s:>6.0f}s  {note}")
-        print("=" * 78)
-        n_ok = sum(1 for r in self.results if r.status in ("ok", "ok_partial"))
-        print(f"  {n_ok}/{len(self.results)} sites reported ok or partial\n")
+            note = r.reason[:32]
+            excluded_total = sum(r.excluded.values())
+            print(f"  {r.site:<{width_site}}{r.status:<{width_status}}{r.jobs:>5}{r.valid:>7}{r.duplicates:>7}"
+                  f"{excluded_total:>5}  {r.duration_s:>5.0f}s  {note}")
+        print(line)
+        sites_read = sum(1 for r in self.results if r.status in USABLE_STATUSES)
+        print(f"  Overall: {self.overall_status()} ({sites_read}/{len(self.results)} sites read)\n")
+
+
+def overall_status(results: list[SiteResult]) -> str:
+    """Explicit criteria for a whole scan."""
+    countable = [r for r in results if r.status != "disabled"]
+    if not countable:
+        return OVERALL_FAILURE
+    if all(r.status in READ_OK_STATUSES for r in countable):
+        return OVERALL_SUCCESS
+    if any(r.status in USABLE_STATUSES for r in countable):
+        return OVERALL_PARTIAL
+    return OVERALL_FAILURE
 
 
 def _calculated_status(jobs: int, status: str) -> str:

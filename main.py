@@ -4,10 +4,8 @@ import argparse
 import json
 import os
 import sys
-import tempfile
 import time
 import webbrowser
-from collections import Counter
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -16,15 +14,20 @@ from typing import Any
 from playwright.sync_api import sync_playwright
 
 import ai_analyzer
+import cache_store
 import dashboard_builder
 import distance_calculator
+import fx_rates
 import job_filter
 import startup_config
 import setup_panel
-from ai_analyzer import AI_DESCRIPTION, AI_GROSS_SALARY, AI_REASON, AI_SUITABLE, analyze_jobs, normalize_ai_fields
+from ai_analyzer import AI_SUITABLE, analyze_jobs
 from dashboard_builder import generate_html
-from job_filter import filter_jobs, is_valid_job, normalize_url
-from scrapers import create_browser_context, fetch_description, save_session
+from job_lifecycle import apply_verification, jobs_to_verify, merge_scan
+from job_pipeline import PipelineResult, exclusion_reason, process_jobs
+from job_status import STATUS_ACTIVE
+from preferences import SearchPreferences, preferences_from_settings
+from scrapers import check_listing, create_browser_context, fetch_description, looks_like_block_page, save_session
 from scrapers import settings as config
 from scrapers.adecco_ch import scrape_adecco_ch
 from scrapers.carriera_ch import scrape_carriera_ch
@@ -33,6 +36,7 @@ from scrapers.gigroup_ch import scrape_gigroup_ch
 from scrapers.indeed_ch import scrape_indeed_ch
 from scrapers.jobs_ch import scrape_jobs_ch
 from scrapers.jobscout24_ch import scrape_jobscout24_ch
+from scrapers.italy_portals import scrape_indeed_it, scrape_linkedin_it
 from scrapers.linkedin_ch import scrape_linkedin_ch
 from scrapers.manpower_ch import scrape_manpower_ch
 from scrapers.monster_ch import scrape_monster_ch
@@ -43,9 +47,15 @@ from scrapers.site_report import ScrapeError, classify_exception, run_report
 
 CACHE_FILE = Path("jobs_cache.json")
 
+# A listing page takes about 7 seconds to open; the rest are read on the next run.
+MAX_DESCRIPTIONS_PER_RUN = 60
+
 # Set by _apply_search_settings when a saved panel configuration is used.
 _AI_ENABLED = True
 _ACTIVE_SOURCES: set[str] | None = None
+_PREFERENCES = SearchPreferences()
+_FX_MODE = fx_rates.FX_MODE_ECB
+_FX_MANUAL_RATE: float | None = None
 
 ScraperEntry = tuple[str, str, Callable[[Any], list[dict]]]
 ProbeEntry = tuple[str, str]
@@ -63,6 +73,8 @@ SCRAPERS: list[ScraperEntry] = [
     ("MANPOWER CH", "manpower.ch", scrape_manpower_ch),
     ("FRONTALIERETICINO CH", "frontaliereticino.ch", scrape_frontaliereticino_ch),
     ("LINKEDIN CH", "linkedin.ch", scrape_linkedin_ch),
+    ("INDEED IT", "indeed.it", scrape_indeed_it),
+    ("LINKEDIN IT", "linkedin.it", scrape_linkedin_it),
 ]
 
 PROBES: dict[str, ProbeEntry] = {
@@ -84,6 +96,9 @@ PROBES: dict[str, ProbeEntry] = {
     "manpower.ch": ("https://www.manpower.ch/it/trova-lavoro/citta/lugano",
                     'a[href*="/it/job/"]'),
     "linkedin.ch": ("https://www.linkedin.com/jobs/search/?keywords=&location=Ticino%2C+Switzerland",
+                    '[class*="base-card"]'),
+    "indeed.it": ("https://it.indeed.com/jobs?q=sviluppatore&l=Lombardia", "a[data-jk]"),
+    "linkedin.it": ("https://www.linkedin.com/jobs/search/?keywords=sviluppatore&location=Lombardia%2C+Italia",
                     '[class*="base-card"]'),
 }
 
@@ -163,19 +178,7 @@ def _close_quietly(obj: Any) -> None:
 
 
 def _save_cache(jobs: list[dict]) -> None:
-    jobs = [normalize_ai_fields(job) for job in jobs]
-    # Replace the cache only after the complete JSON has been written successfully.
-    cache_content = json.dumps(jobs, ensure_ascii=False, indent=2)
-    temporary_path = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=CACHE_FILE.parent,
-                                         prefix=".jobs-cache-", suffix=".tmp", delete=False) as temporary_file:
-            temporary_path = Path(temporary_file.name)
-            temporary_file.write(cache_content)
-        os.replace(temporary_path, CACHE_FILE)
-    finally:
-        if temporary_path is not None and temporary_path.exists():
-            temporary_path.unlink()
+    cache_store.save_jobs(CACHE_FILE, jobs)
     print(f"[CACHE] Saved {len(jobs)} jobs to {CACHE_FILE}")
 
 
@@ -183,65 +186,19 @@ def _load_cache() -> list[dict]:
     if not CACHE_FILE.exists():
         print("[ERROR] No jobs_cache.json found. Run: python main.py")
         sys.exit(1)
-    jobs = _read_cache_or_empty()
+    jobs = cache_store.load_jobs(CACHE_FILE)
     saved_at = datetime.fromtimestamp(CACHE_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
     print(f"[CACHE] Loaded {len(jobs)} jobs from {CACHE_FILE} saved at {saved_at}")
     return jobs
 
 
-def _merge_with_cache(new_jobs: list[dict], scanned_sources: set[str]) -> list[dict]:
-    if not CACHE_FILE.exists():
-        return new_jobs
-    old_jobs = _read_cache_or_empty()
-    kept_jobs = [job for job in old_jobs if job.get("source") not in scanned_sources]
-    if kept_jobs:
-        print(f"[CACHE] Preserved {len(kept_jobs)} jobs from sources not scanned.")
-    return new_jobs + kept_jobs
+def _read_previous_jobs() -> list[dict]:
+    """Jobs from earlier scans; an unreadable cache stops the run instead of being overwritten."""
+    return cache_store.load_jobs(CACHE_FILE)
 
 
-def _read_cache_or_empty() -> list[dict]:
-    if not CACHE_FILE.exists():
-        return []
-    jobs = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
-    if not isinstance(jobs, list) or any(not isinstance(job, dict) for job in jobs):
-        raise ValueError(f"Invalid cache format in {CACHE_FILE}; cache was not overwritten")
-    return [normalize_ai_fields(job) for job in jobs]
-
-
-def _reuse_previous_data(valid_jobs: list[dict]) -> int:
-    old_jobs_by_url = _old_jobs_by_url()
-    reused_count = 0
-    for job in valid_jobs:
-        old_job = old_jobs_by_url.get(normalize_url(job.get("url", "")))
-        if old_job:
-            reused_count += _reuse_one_job(job, old_job)
-    return reused_count
-
-
-def _old_jobs_by_url() -> dict[str, dict]:
-    old_jobs = _read_cache_or_empty()
-    return {
-        normalize_url(job.get("url", "")): job
-        for job in old_jobs
-        if normalize_url(job.get("url", ""))
-    }
-
-
-def _reuse_one_job(job: dict, old_job: dict) -> int:
-    if old_job.get("description") and not job.get("description"):
-        job["description"] = old_job["description"]
-        job["email"] = old_job.get("email", "")
-    old_job = normalize_ai_fields(old_job)
-    if old_job.get(AI_SUITABLE) is not None:
-        _copy_ai_fields(job, old_job)
-    return 1
-
-
-def _copy_ai_fields(job: dict, old_job: dict) -> None:
-    job[AI_SUITABLE] = old_job[AI_SUITABLE]
-    job[AI_REASON] = old_job.get(AI_REASON, "")
-    job[AI_DESCRIPTION] = old_job.get(AI_DESCRIPTION, "")
-    job[AI_GROSS_SALARY] = old_job.get(AI_GROSS_SALARY)
+def _current_fx_rate() -> fx_rates.FxRate:
+    return fx_rates.get_fx_rate(_FX_MODE, _FX_MANUAL_RATE)
 
 
 def _select_scrapers(only: str) -> list[ScraperEntry]:
@@ -408,25 +365,40 @@ def _scrape_one_site(scraper: Callable[[Any], list[dict]], site: str, context: A
     return jobs
 
 
-def _print_filter_summary(raw_jobs: list[dict], valid_jobs: list[dict]) -> None:
-    in_area = sum(1 for job in raw_jobs if is_valid_job(job))
-    print(f"[FILTER] {len(raw_jobs)} raw -> {in_area} in allowed cities -> {len(valid_jobs)} unique")
-    by_source = Counter(job.get("source", "?") for job in valid_jobs)
-    print("[FILTER] By source: " + " | ".join(f"{site}:{count}" for site, count in sorted(by_source.items())))
+def _print_scan_summary(result: PipelineResult) -> None:
+    for source, stats in sorted(result.stats.items()):
+        run_report.add_job_stats(source, stats.collected, stats.valid, stats.duplicates, dict(stats.excluded))
+        reasons = ", ".join(f"{reason}:{count}" for reason, count in sorted(stats.excluded.items()))
+        reason_text = ""
+        if reasons:
+            reason_text = f" ({reasons})"
+        print(f"[FILTER] {source}: collected {stats.collected}, valid {stats.valid}, "
+              f"duplicates {stats.duplicates}, excluded {sum(stats.excluded.values())}{reason_text}")
 
 
 def _download_descriptions(context: Any, valid_jobs: list[dict]) -> None:
-    jobs_to_download = [job for job in valid_jobs if not job.get("description")]
+    jobs_to_download = [job for job in valid_jobs if _needs_description(job)]
     if not jobs_to_download:
         return
-    _download_description_batch(context, jobs_to_download, len(valid_jobs))
+    left_for_next_run = len(jobs_to_download) - MAX_DESCRIPTIONS_PER_RUN
+    if left_for_next_run > 0:
+        print(f"[DESC] Opening the {MAX_DESCRIPTIONS_PER_RUN} newest pages now; {left_for_next_run} more on the next run.")
+    _download_description_batch(context, jobs_to_download[:MAX_DESCRIPTIONS_PER_RUN], len(valid_jobs))
+
+
+def _needs_description(job: dict) -> bool:
+    """Only listings seen in this scan are opened; cached ones may be gone or blocked."""
+    description = str(job.get("description") or "")
+    if description and not looks_like_block_page(description):
+        return False
+    return job.get("status") in (None, STATUS_ACTIVE)
 
 
 def _download_description_batch(context: Any, jobs_to_download: list[dict], total_valid: int) -> None:
     started_at = time.perf_counter()
     step_times: list[float] = []
     cached_count = total_valid - len(jobs_to_download)
-    print(f"\n=== DESCRIPTIONS ({len(jobs_to_download)} to download, {cached_count} cached) ===")
+    print(f"\n=== DESCRIPTIONS ({len(jobs_to_download)} to download now, {cached_count} other jobs of {total_valid}) ===")
     for index, job in enumerate(jobs_to_download):
         _download_one_description(context, job, index, jobs_to_download, started_at, step_times)
     _print_progress(len(jobs_to_download), len(jobs_to_download),
@@ -448,41 +420,70 @@ def _download_one_description(context: Any, job: dict, index: int, jobs_to_downl
 
 def _run_scrape(only: str = "", scan_only: bool = False) -> list[dict] | None:
     selected = _select_scrapers(only)
-    valid_jobs, completed = _collect_valid_jobs(selected, scan_only)
-    return _finish_scrape_run(valid_jobs, selected, only, completed, scan_only)
+    jobs, completed = _collect_jobs(selected, scan_only)
+    return _finish_scrape_run(jobs, completed, scan_only)
 
 
-def _collect_valid_jobs(selected: list[ScraperEntry], scan_only: bool) -> tuple[list[dict], bool]:
+def _collect_jobs(selected: list[ScraperEntry], scan_only: bool) -> tuple[list[dict], bool]:
     with sync_playwright() as playwright:
         return _collect_with_browser(playwright, selected, scan_only)
 
 
 def _collect_with_browser(playwright: Any, selected: list[ScraperEntry], scan_only: bool) -> tuple[list[dict], bool]:
     raw_jobs: list[dict] = []
-    valid_jobs: list[dict] = []
+    jobs: list[dict] = []
     browser, context = create_browser_context(playwright)
     try:
         browser, context = _scrape_selected_sites(playwright, browser, context, selected, raw_jobs)
-        valid_jobs = filter_jobs(raw_jobs)
-        _prepare_valid_jobs(raw_jobs, valid_jobs, context, scan_only)
-        return valid_jobs, True
+        jobs = _build_job_list(raw_jobs, scan_only)
+        if not scan_only:
+            _download_descriptions(context, jobs)
+            _verify_possibly_expired(context, jobs)
+        return jobs, True
     except KeyboardInterrupt:
-        return _interrupted_jobs(raw_jobs, valid_jobs), False
+        return jobs or _interrupted_jobs(raw_jobs), False
     except Exception as exc:
-        return _critical_error_jobs(exc, raw_jobs, valid_jobs), False
+        return jobs or _critical_error_jobs(exc, raw_jobs), False
     finally:
         save_session(context)
         _close_quietly(browser)
 
 
-def _interrupted_jobs(raw_jobs: list[dict], valid_jobs: list[dict]) -> list[dict]:
+def _build_job_list(raw_jobs: list[dict], scan_only: bool) -> list[dict]:
+    """Filter the scan, then combine it with the cache so blocked portals lose nothing."""
+    result = process_jobs(raw_jobs, _PREFERENCES)
+    _print_scan_summary(result)
+    if scan_only:
+        return result.jobs
+    outcomes = {site_result.site: site_result.status for site_result in run_report.results}
+    jobs, status_counts = merge_scan(_read_previous_jobs(), result.jobs, outcomes, _PREFERENCES, datetime.now())
+    summary = ", ".join(f"{status}:{count}" for status, count in sorted(status_counts.items()))
+    print(f"[CACHE] {len(jobs)} jobs after merging with the cache ({summary}).")
+    return jobs
+
+
+def _verify_possibly_expired(context: Any, jobs: list[dict]) -> None:
+    """Open a few possibly-expired listing pages to learn whether they are really gone."""
+    candidates = jobs_to_verify(jobs, _PREFERENCES.verify_limit)
+    if not candidates:
+        return
+    print(f"\n=== VERIFY ({len(candidates)} possibly expired listings) ===")
+    verdict_counts: dict[str, int] = {}
+    for job in candidates:
+        verdict = check_listing(context, job.get("url", ""))
+        apply_verification(job, verdict, datetime.now())
+        verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
+    print("[VERIFY] " + ", ".join(f"{verdict}:{count}" for verdict, count in sorted(verdict_counts.items())))
+
+
+def _interrupted_jobs(raw_jobs: list[dict]) -> list[dict]:
     print("\n[STOP] Interrupted. Saving what was collected.")
-    return valid_jobs or filter_jobs(raw_jobs)
+    return process_jobs(raw_jobs, _PREFERENCES).jobs
 
 
-def _critical_error_jobs(exc: Exception, raw_jobs: list[dict], valid_jobs: list[dict]) -> list[dict]:
+def _critical_error_jobs(exc: Exception, raw_jobs: list[dict]) -> list[dict]:
     print(f"[CRITICAL ERROR] {exc}")
-    return valid_jobs or filter_jobs(raw_jobs)
+    return process_jobs(raw_jobs, _PREFERENCES).jobs
 
 
 def _scrape_selected_sites(
@@ -517,43 +518,25 @@ def _scrape_site_with_progress(scraper: Callable[[Any], list[dict]], site: str, 
     return jobs
 
 
-def _prepare_valid_jobs(raw_jobs: list[dict], valid_jobs: list[dict], context: Any, scan_only: bool) -> None:
-    _print_filter_summary(raw_jobs, valid_jobs)
-    reused_count = _reuse_previous_data(valid_jobs)
-    if reused_count:
-        print(f"[CACHE] Reused paid description/AI data for {reused_count} jobs.")
-    if not scan_only:
-        _download_descriptions(context, valid_jobs)
-
-
-def _finish_scrape_run(
-    valid_jobs: list[dict],
-    selected: list[ScraperEntry],
-    only: str,
-    completed: bool,
-    scan_only: bool = False,
-) -> list[dict] | None:
+def _finish_scrape_run(jobs: list[dict], completed: bool, scan_only: bool = False) -> list[dict] | None:
     run_report.print_table()
     run_report.save()
     if not completed:
         if not scan_only:
-            _save_completed_or_partial(valid_jobs, False)
+            _save_completed_or_partial(jobs, False)
         return None
     if scan_only:
-        return valid_jobs
-    # Preserve old results when a source failed or returned an ambiguous empty result.
-    successful_sources = {result.site for result in run_report.results if result.status == "ok"}
-    valid_jobs = filter_jobs(_merge_with_cache(valid_jobs, successful_sources))
-    _save_completed_or_partial(valid_jobs, True)
-    return valid_jobs
+        return jobs
+    _save_completed_or_partial(jobs, True)
+    return jobs
 
 
-def _save_completed_or_partial(valid_jobs: list[dict], completed: bool) -> None:
-    if valid_jobs and completed:
-        _save_cache(valid_jobs)
-    elif valid_jobs:
+def _save_completed_or_partial(jobs: list[dict], completed: bool) -> None:
+    if jobs and completed:
+        _save_cache(jobs)
+    elif jobs:
         partial_file = Path("jobs_cache.partial.json")
-        partial_file.write_text(json.dumps(valid_jobs, ensure_ascii=False, indent=2), encoding="utf-8")
+        partial_file.write_text(json.dumps(jobs, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"[CACHE] Incomplete scan saved to {partial_file}. Main cache was not overwritten.")
 
 
@@ -625,9 +608,9 @@ def _finish_scan_only(args: argparse.Namespace, started_at: datetime) -> bool:
     return True
 
 
-def _finalize_jobs(valid_jobs: list[dict], started_at: datetime) -> None:
+def _finalize_jobs(valid_jobs: list[dict], started_at: datetime, retry_unanalyzable: bool = False) -> None:
     if _AI_ENABLED:
-        analyzed_jobs = analyze_jobs(valid_jobs)
+        analyzed_jobs = analyze_jobs(valid_jobs, retry_unanalyzable=retry_unanalyzable)
     else:
         print("[AI] Analysis is switched off in the settings.")
         analyzed_jobs = valid_jobs
@@ -635,11 +618,28 @@ def _finalize_jobs(valid_jobs: list[dict], started_at: datetime) -> None:
         _save_cache(analyzed_jobs)
     if _AI_ENABLED and analyzed_jobs and not any(job.get(AI_SUITABLE) is not None for job in analyzed_jobs):
         print("[HINT] To analyze missing cached jobs: python main.py --reanalyze")
-    visible_jobs = analyzed_jobs
-    if _ACTIVE_SOURCES is not None:
-        visible_jobs = [job for job in analyzed_jobs if job.get("source") in _ACTIVE_SOURCES]
-    generate_html(visible_jobs)
+    generate_html(_visible_jobs(analyzed_jobs), fx_rate=_current_fx_rate())
     _open_dashboard(started_at)
+
+
+def _visible_jobs(jobs: list[dict]) -> list[dict]:
+    """Jobs that match the current settings. Everything else stays in the cache untouched."""
+    visible_jobs = []
+    for job in jobs:
+        if not _from_active_source(job):
+            continue
+        if exclusion_reason(job, _PREFERENCES):
+            continue
+        visible_jobs.append(job)
+    return visible_jobs
+
+
+def _from_active_source(job: dict) -> bool:
+    if _ACTIVE_SOURCES is None:
+        return True
+    job_sources = {reference.get("source") for reference in job.get("sources") or []}
+    job_sources.add(job.get("source"))
+    return bool(job_sources & _ACTIVE_SOURCES)
 
 
 def _open_dashboard(started_at: datetime) -> None:
@@ -649,7 +649,7 @@ def _open_dashboard(started_at: datetime) -> None:
 
 
 def _initial_settings(available_sources: set[str]) -> dict:
-    settings = startup_config.default_settings(job_filter.ALLOWED_CITIES, sorted(available_sources), job_filter.SEARCH_TERMS)
+    settings = startup_config.default_settings(sorted(available_sources), job_filter.SEARCH_TERMS)
     legacy_config = sys.modules.get("user_config")
     if legacy_config is not None:
         settings["home_city"] = distance_calculator.HOME_CITY
@@ -660,9 +660,8 @@ def _initial_settings(available_sources: set[str]) -> dict:
 
 
 def _apply_search_settings(settings: dict, args: argparse.Namespace) -> None:
-    global _AI_ENABLED, _ACTIVE_SOURCES
-    job_filter.ALLOWED_CITIES.clear()
-    job_filter.ALLOWED_CITIES.update(settings["cities"])
+    global _AI_ENABLED, _ACTIVE_SOURCES, _PREFERENCES, _FX_MODE, _FX_MANUAL_RATE
+    _PREFERENCES = preferences_from_settings(settings)
     job_filter.SEARCH_TERMS[:] = settings["search_terms"]
     distance_calculator._HOME_COORDINATES = None
     if settings["home_lat"] is not None:
@@ -670,10 +669,14 @@ def _apply_search_settings(settings: dict, args: argparse.Namespace) -> None:
     dashboard_builder.HOME_CITY = settings["home_city"] or "Home"
     ai_analyzer.CANDIDATE_PROFILE_OVERRIDE = settings["candidate_profile"]
     _AI_ENABLED = settings["ai_enabled"]
+    _FX_MODE = settings["fx_mode"]
+    _FX_MANUAL_RATE = settings["fx_manual_eur_per_chf"]
     _ACTIVE_SOURCES = set(settings["sources"])
     if args.timeout <= 0:
         config.PAGE_TIMEOUT_MS = settings["timeout_ms"]
     config.MAX_ATTEMPTS = settings["attempts"]
+    config.SEARCH_PLACE = settings["home_city"]
+    config.SEARCH_RADIUS_KM = settings["radius_km"]
     if not args.only:
         args.only = ",".join(settings["sources"])
     else:
@@ -683,19 +686,24 @@ def _apply_search_settings(settings: dict, args: argparse.Namespace) -> None:
                 _ACTIVE_SOURCES.add(site)
     if settings["headless"]:
         config.HEADLESS = True
+    _warn_about_radius_without_home(settings)
+
+
+def _warn_about_radius_without_home(settings: dict) -> None:
+    if settings["radius_km"] is not None and settings["home_lat"] is None:
+        print("[CONFIG] A distance limit is set but there is no starting point: the limit is ignored.")
 
 
 def _setup_search(args: argparse.Namespace) -> bool:
     available_sources = {site for _, site, _ in SCRAPERS if site != "monster.ch"}
-    allowed_cities = set(job_filter.ALLOWED_CITIES)
-    settings = startup_config.load_settings(startup_config.SETTINGS_FILE, allowed_cities, available_sources)
+    settings = startup_config.load_settings(startup_config.SETTINGS_FILE, available_sources)
     open_panel = args.panel
     if not any((args.background, args.dry_run, args.scan_only, args.reanalyze,
                 args.only, args.headless, args.project_dir)):
         open_panel = True
     if open_panel:
         settings = settings or _initial_settings(available_sources)
-        setup_panel.open_panel(settings, allowed_cities, available_sources)
+        setup_panel.open_panel(settings, available_sources)
         return False
     if settings is not None:
         _apply_search_settings(settings, args)
@@ -726,7 +734,7 @@ def main() -> None:
         return
     if _finish_scan_only(args, started_at):
         return
-    _finalize_jobs(valid_jobs, started_at)
+    _finalize_jobs(valid_jobs, started_at, retry_unanalyzable=args.reanalyze)
 
 
 if __name__ == "__main__":
