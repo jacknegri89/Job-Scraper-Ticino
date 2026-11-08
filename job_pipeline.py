@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 
 import geo
 from job_dedup import deduplicate
+from job_classifier import CONTRACT_UNKNOWN, SENIORITY_UNKNOWN
 from job_filter import is_safe_job_url
 from job_model import normalize_job
 from preferences import SearchPreferences
@@ -40,8 +41,13 @@ class PipelineResult:
     stats: dict[str, SourceStats]
 
 
-def exclusion_reason(job: dict, preferences: SearchPreferences) -> str:
-    """Return why a normalized job is not wanted, or '' when it is."""
+def exclusion_reason(job: dict, preferences: SearchPreferences, final: bool = True) -> str:
+    """Return why a normalized job is not wanted, or '' when it is.
+
+    final=False is the check before the description is downloaded: seniority and contract
+    are still "unknown" only because the title says nothing, so those two filters wait for
+    the description instead of throwing the job away too early.
+    """
     if not is_safe_job_url(job.get("url")):
         return REASON_INVALID_URL
     if job.get("work_mode") == geo.WORK_MODE_REMOTE and not preferences.include_remote:
@@ -52,7 +58,7 @@ def exclusion_reason(job: dict, preferences: SearchPreferences) -> str:
         return REASON_OUT_OF_AREA
     if area_status == geo.AREA_UNCERTAIN and not preferences.include_uncertain_location:
         return REASON_UNCERTAIN_LOCATION
-    return _preference_reason(job, preferences)
+    return _preference_reason(job, preferences, final)
 
 
 def _location_of(job: dict) -> geo.Location:
@@ -60,14 +66,23 @@ def _location_of(job: dict) -> geo.Location:
     return geo.resolve_location(str(job.get("city") or ""), str(job.get("country") or ""))
 
 
-def _preference_reason(job: dict, preferences: SearchPreferences) -> str:
+def _preference_reason(job: dict, preferences: SearchPreferences, final: bool) -> str:
     if preferences.categories is not None and job.get("category") not in preferences.categories:
         return REASON_CATEGORY
-    if preferences.seniority_levels is not None and job.get("seniority") not in preferences.seniority_levels:
+    if _is_rejected(job.get("seniority"), preferences.seniority_levels, SENIORITY_UNKNOWN, final):
         return REASON_SENIORITY
-    if preferences.contract_types is not None and job.get("contract_type") not in preferences.contract_types:
+    if _is_rejected(job.get("contract_type"), preferences.contract_types, CONTRACT_UNKNOWN, final):
         return REASON_CONTRACT
     return ""
+
+
+def _is_rejected(value: object, wanted: tuple | frozenset | list | None, unknown_value: str, final: bool) -> bool:
+    """A value outside the wanted ones is rejected; an unknown one is only rejected once final."""
+    if wanted is None or value in wanted:
+        return False
+    if value == unknown_value and not final:
+        return False
+    return True
 
 
 def process_jobs(raw_jobs: list[dict], preferences: SearchPreferences) -> PipelineResult:
@@ -78,7 +93,8 @@ def process_jobs(raw_jobs: list[dict], preferences: SearchPreferences) -> Pipeli
         job = normalize_job(raw_job)
         source_stats = stats.setdefault(str(job.get("source") or "?"), SourceStats())
         source_stats.collected += 1
-        reason = exclusion_reason(job, preferences)
+        # Without a description the seniority and contract may only look unknown.
+        reason = exclusion_reason(job, preferences, final=bool(job.get("description")))
         if reason:
             source_stats.excluded[reason] += 1
             continue

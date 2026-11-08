@@ -126,7 +126,8 @@
       <h2>Optional AI analysis</h2>
       <label class="choice"><input type="checkbox" id="ai-enabled"> Rate each listing against my profile</label>
       <div id="ai-fields"><label for="profile">Professional profile</label><textarea id="profile" maxlength="3000"></textarea>
-        <p class="hint">Your profile and the listing data are sent to OpenAI. The OPENAI_API_KEY environment variable is required: the key is never entered or stored here. If you change the profile, listings are rated again on the next search.</p></div>
+        <label for="ai-limit">Most listings rated per search</label><input id="ai-limit" type="number" min="1" max="200" step="1" required>
+        <p class="hint">Your profile and the listing data are sent to OpenAI, which charges for each rating. The AI is off until you tick the box above, and a search never rates more listings than this limit (newest first; the rest wait for the next search). The OPENAI_API_KEY environment variable is required: the key is never entered or stored here. If you change the profile, listings are rated again on the next search.</p></div>
     </section>
     <section>
       <h2>Freshness and exchange rate</h2>
@@ -254,6 +255,7 @@ function collectSettings() {
     sources, search_terms: terms,
     home_city: homeCity, home_lat: homeLat, home_lng: homeLng,
     ai_enabled: byId("ai-enabled").checked,
+    ai_max_per_run: Number(byId("ai-limit").value),
     candidate_profile: byId("profile").value.trim(),
     headless: true,
     timeout_ms: Number(byId("timeout").value), attempts: Number(byId("attempts").value),
@@ -317,7 +319,7 @@ async function refreshStatus() {
   try {
     const response = await fetch(`/${data.token}/status`, {cache: "no-store"});
     const result = await response.json();
-    const labels = {idle: "Ready to start.", running: "Search running in the background…", complete: "Search complete. Your dashboard is ready.", error: "The search failed. Check scraper.log in the project folder."};
+    const labels = {idle: "Ready to start.", running: "Search running in the background…", complete: "Search complete. Your dashboard is ready.", partial: "Search finished, but some sources could not be read. The dashboard shows what was found plus saved listings. Details are in scan_report.json.", busy: "Another search was already running, so nothing was changed.", error: "The search failed: no source could be read, and the dashboard was not changed. Check scraper.log and scan_report.json in the project folder."};
     statusText.textContent = labels[result.status] || "Status unavailable.";
     startButton.disabled = result.status === "running";
   } catch (_) {
@@ -342,6 +344,7 @@ byId("home-city").value = saved.home_city;
 byId("latitude").value = saved.home_lat ?? "";
 byId("longitude").value = saved.home_lng ?? "";
 byId("ai-enabled").checked = saved.ai_enabled;
+byId("ai-limit").value = saved.ai_max_per_run;
 byId("profile").value = saved.candidate_profile;
 byId("expiry").value = saved.expiry_days;
 byId("retention").value = saved.retention_days;

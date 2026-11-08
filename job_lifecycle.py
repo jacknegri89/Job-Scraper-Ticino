@@ -23,7 +23,10 @@ from job_status import (
 )
 from preferences import SearchPreferences
 
-SOURCE_FULLY_SCANNED = "ok"
+# A source was searched to the end when it returned listings ("ok") or said, in a way we
+# recognised, that nothing matches ("no_results"). Blocks, errors, partial reads and
+# "empty" (no proof that the page was understood) never prove that a job has gone.
+SOURCE_FULLY_SCANNED = ("ok", "no_results")
 
 # Fields filled in later (descriptions, AI, salary text) that must survive a rescan.
 CARRIED_FIELDS = ("description", "email", "salary_text")
@@ -149,7 +152,7 @@ def _age_in_days(job: dict, now: datetime) -> int:
 def _set_status_from_sources(job: dict, source_outcomes: dict[str, str]) -> None:
     sources = [ref.get("source", "") for ref in _references(job)] or [str(job.get("source") or "")]
     outcomes = [source_outcomes.get(source) for source in sources]
-    if all(outcome == SOURCE_FULLY_SCANNED for outcome in outcomes):
+    if all(outcome in SOURCE_FULLY_SCANNED for outcome in outcomes):
         _set_status(job, STATUS_POSSIBLY_EXPIRED, "not in the latest complete scan of its source")
         return
     _set_status(job, STATUS_CACHED, _unavailable_reason(sources, outcomes))
@@ -159,7 +162,7 @@ def _unavailable_reason(sources: list[str], outcomes: list[str | None]) -> str:
     for source, outcome in zip(sources, outcomes, strict=True):
         if outcome is None:
             return f"{source} was not scanned in this run"
-        if outcome != SOURCE_FULLY_SCANNED:
+        if outcome not in SOURCE_FULLY_SCANNED:
             return f"{source} could not be read completely ({outcome})"
     return ""
 

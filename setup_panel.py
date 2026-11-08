@@ -14,7 +14,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import geo
+import run_lock
 import startup_config
+from exit_codes import EXIT_BUSY, EXIT_PARTIAL, EXIT_SUCCESS
 from job_classifier import CONTRACT_TYPES, SENIORITY_LEVELS
 from job_filter import ALL_CATEGORIES
 from urllib.parse import parse_qs, urlsplit
@@ -22,9 +24,21 @@ from urllib.parse import parse_qs, urlsplit
 PROJECT_DIR = Path(__file__).resolve().parent
 PANEL_FILE = PROJECT_DIR / "setup_panel.html"
 LOG_FILE = PROJECT_DIR / "scraper.log"
+LOCK_PATH = PROJECT_DIR / run_lock.LOCK_FILE_NAME
 MAX_BODY_BYTES = 16384
 MAX_REQUESTS_PER_MINUTE = 30
 MAX_PLACE_QUERY_LENGTH = 80
+
+
+def status_for_exit_code(exit_code):
+    """Panel wording for the exit code of a finished search (see exit_codes.py)."""
+    if exit_code == EXIT_SUCCESS:
+        return "complete"
+    if exit_code == EXIT_PARTIAL:
+        return "partial"
+    if exit_code == EXIT_BUSY:
+        return "busy"
+    return "error"
 
 
 class LocalPanelServer(ThreadingHTTPServer):
@@ -47,7 +61,7 @@ class LocalPanelServer(ThreadingHTTPServer):
             result = self.process.poll()
             if result is None:
                 return "running"
-            return "complete" if result == 0 else "error"
+            return status_for_exit_code(result)
 
     def save(self, settings):
         startup_config.validate_settings(settings, self.sources)
@@ -62,6 +76,8 @@ class LocalPanelServer(ThreadingHTTPServer):
         with self.lock:
             if self.process is not None and self.process.poll() is None:
                 raise ValueError("A search is already running.")
+            if run_lock.is_running(LOCK_PATH):
+                raise ValueError("A search is already running (started from another window or a scheduled task).")
             startup_config.save_settings(startup_config.SETTINGS_FILE, settings)
             self.settings = settings
             command = [sys.executable, str(PROJECT_DIR / "main.py"), "--background", "--headless", "--project-dir"]

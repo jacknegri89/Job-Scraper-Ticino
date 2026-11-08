@@ -8,7 +8,7 @@ Normalized fields added to each job:
     published                                                    YYYY-MM-DD, or "" if unknown
     canonical_url, sources                                       original links on each portal
     category, seniority, seniority_evidence, contract_type       what kind of job it is
-    work_mode                                                    "remote", "hybrid" or "" (on site), as written
+    work_mode, work_mode_evidence                                "remote", "hybrid" or "" (not stated), see work_mode.py
 """
 
 from copy import deepcopy
@@ -16,6 +16,7 @@ from copy import deepcopy
 import geo
 from job_classifier import classify_contract, classify_seniority
 from job_filter import categorize_job, normalize_url, sort_date
+from work_mode import work_mode_of_job
 
 COUNTRY_SWITZERLAND = "CH"
 COUNTRY_ITALY = "IT"
@@ -40,18 +41,30 @@ def normalize_job(raw_job: dict) -> dict:
     """Return a copy of the job with the normalized fields filled in."""
     job = deepcopy(raw_job)
     title = str(job.get("title") or "")
-    description = str(job.get("description") or "")
     _set_location_fields(job)
-    job["work_mode"] = geo.work_mode_of(str(job.get("city") or ""))
     job["published"] = sort_date(job.get("date"))
     job["canonical_url"] = normalize_url(str(job.get("url") or ""))
     job["category"] = categorize_job(title)
+    job["sources"] = _source_references(job)
+    refresh_from_description(job)
+    return job
+
+
+def refresh_from_description(job: dict) -> None:
+    """Read seniority, contract and work mode again, with the description if there is one.
+
+    The title alone may leave them unknown; the full description can settle them. Call this
+    whenever a description was downloaded or carried over from the cache.
+    """
+    title = str(job.get("title") or "")
+    description = str(job.get("description") or "")
     level, evidence = classify_seniority(title, description)
     job["seniority"] = level
     job["seniority_evidence"] = evidence
     job["contract_type"] = classify_contract(title, description)
-    job["sources"] = _source_references(job)
-    return job
+    mode, mode_evidence = work_mode_of_job(str(job.get("city") or ""), title, description)
+    job["work_mode"] = mode
+    job["work_mode_evidence"] = mode_evidence
 
 
 def _set_location_fields(job: dict) -> None:

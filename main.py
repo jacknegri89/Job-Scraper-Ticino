@@ -19,14 +19,17 @@ import dashboard_builder
 import distance_calculator
 import fx_rates
 import job_filter
+import run_lock
 import startup_config
 import setup_panel
 from ai_analyzer import AI_SUITABLE, analyze_jobs
 from dashboard_builder import generate_html
+from exit_codes import EXIT_BUSY, EXIT_FAILURE, EXIT_PARTIAL, EXIT_SUCCESS, exit_code_for_overall_status
 from job_lifecycle import apply_verification, jobs_to_verify, merge_scan
+from job_model import refresh_from_description
 from job_pipeline import PipelineResult, exclusion_reason, process_jobs
-from job_status import STATUS_ACTIVE
-from preferences import SearchPreferences, preferences_from_settings
+from job_status import STATUS_ACTIVE, STATUS_GONE, STATUS_POSSIBLY_EXPIRED
+from preferences import DEFAULT_AI_MAX_PER_RUN, SearchPreferences, preferences_from_settings
 from scrapers import check_listing, create_browser_context, fetch_description, looks_like_block_page, save_session
 from scrapers import settings as config
 from scrapers.adecco_ch import scrape_adecco_ch
@@ -43,15 +46,19 @@ from scrapers.monster_ch import scrape_monster_ch
 from scrapers.orienta_ch import scrape_orienta_ch
 from scrapers.page_guard import detect_auth_gate, detect_block, dismiss_cookies
 from scrapers.randstad_ch import scrape_randstad_ch
-from scrapers.site_report import ScrapeError, classify_exception, run_report
+from scrapers.site_report import OVERALL_FAILURE, ScrapeError, classify_exception, run_report
 
 CACHE_FILE = Path("jobs_cache.json")
+LOCK_FILE = Path(run_lock.LOCK_FILE_NAME)
 
 # A listing page takes about 7 seconds to open; the rest are read on the next run.
 MAX_DESCRIPTIONS_PER_RUN = 60
 
 # Set by _apply_search_settings when a saved panel configuration is used.
-_AI_ENABLED = True
+# The AI is paid and sends data to OpenAI, so it only runs when the user switched it on
+# (panel checkbox or --ai); having OPENAI_API_KEY in the environment is not enough.
+_AI_ENABLED = False
+_AI_MAX_PER_RUN = DEFAULT_AI_MAX_PER_RUN
 _ACTIVE_SOURCES: set[str] | None = None
 _PREFERENCES = SearchPreferences()
 _FX_MODE = fx_rates.FX_MODE_ECB
@@ -412,6 +419,8 @@ def _download_one_description(context: Any, job: dict, index: int, jobs_to_downl
     details = fetch_description(context, job.get("url", ""))
     job["description"] = details["description"]
     job["email"] = details["email"]
+    # The full text may settle what the title left open (seniority, contract, remote work).
+    refresh_from_description(job)
     step_times.append(time.perf_counter() - step_started_at)
     email_label = " [email]" if details["email"] else ""
     print(f"[DESC] {index + 1}/{len(jobs_to_download)} - {job.get('title', '')[:50]}"
@@ -457,6 +466,9 @@ def _build_job_list(raw_jobs: list[dict], scan_only: bool) -> list[dict]:
         return result.jobs
     outcomes = {site_result.site: site_result.status for site_result in run_report.results}
     jobs, status_counts = merge_scan(_read_previous_jobs(), result.jobs, outcomes, _PREFERENCES, datetime.now())
+    for job in jobs:
+        if job.get("description"):
+            refresh_from_description(job)
     summary = ", ".join(f"{status}:{count}" for status, count in sorted(status_counts.items()))
     print(f"[CACHE] {len(jobs)} jobs after merging with the cache ({summary}).")
     return jobs
@@ -527,6 +539,11 @@ def _finish_scrape_run(jobs: list[dict], completed: bool, scan_only: bool = Fals
         return None
     if scan_only:
         return jobs
+    if run_report.overall_status() == OVERALL_FAILURE:
+        # Nothing new was read, so there is nothing to learn: the saved jobs and the
+        # previous dashboard stay exactly as they were.
+        print("[WARN] No source could be read. The cache and the dashboard were not changed.")
+        return None
     _save_completed_or_partial(jobs, True)
     return jobs
 
@@ -556,6 +573,8 @@ def _add_scan_args(parser: argparse.ArgumentParser) -> None:
                         help="probe each site without a full scrape")
     parser.add_argument("--only", default="",
                         help="limit to matching sites, for example --only indeed,linkedin")
+    parser.add_argument("--ai", action="store_true",
+                        help="rate listings with the AI in this run (needs OPENAI_API_KEY; it is paid)")
 
 
 def _add_runtime_args(parser: argparse.ArgumentParser) -> None:
@@ -573,11 +592,19 @@ def _add_runtime_args(parser: argparse.ArgumentParser) -> None:
                         help="manual login and saved session, for example --auth linkedin")
 
 
+def _ai_requested_on_command_line(args: argparse.Namespace) -> bool:
+    """--ai and --reanalyze are explicit requests for the paid analysis."""
+    return bool(getattr(args, "ai", False) or getattr(args, "reanalyze", False))
+
+
 def _apply_cli_overrides(args: argparse.Namespace) -> None:
+    global _AI_ENABLED
     if args.headless:
         config.HEADLESS = True
     if args.timeout > 0:
         config.PAGE_TIMEOUT_MS = args.timeout
+    if _ai_requested_on_command_line(args):
+        _AI_ENABLED = True
 
 
 def _run_auth_mode(site: str) -> None:
@@ -609,17 +636,24 @@ def _finish_scan_only(args: argparse.Namespace, started_at: datetime) -> bool:
 
 
 def _finalize_jobs(valid_jobs: list[dict], started_at: datetime, retry_unanalyzable: bool = False) -> None:
+    visible_jobs = _visible_jobs(valid_jobs)
     if _AI_ENABLED:
-        analyzed_jobs = analyze_jobs(valid_jobs, retry_unanalyzable=retry_unanalyzable)
+        # The analysis changes the job dictionaries in place, so the full cache keeps the results.
+        analyze_jobs(_jobs_worth_analyzing(visible_jobs), retry_unanalyzable=retry_unanalyzable,
+                     max_jobs=_AI_MAX_PER_RUN)
     else:
-        print("[AI] Analysis is switched off in the settings.")
-        analyzed_jobs = valid_jobs
-    if analyzed_jobs:
-        _save_cache(analyzed_jobs)
-    if _AI_ENABLED and analyzed_jobs and not any(job.get(AI_SUITABLE) is not None for job in analyzed_jobs):
+        print("[AI] Analysis is switched off. Tick it in the panel or use --ai to turn it on.")
+    if valid_jobs:
+        _save_cache(valid_jobs)
+    if _AI_ENABLED and valid_jobs and not any(job.get(AI_SUITABLE) is not None for job in valid_jobs):
         print("[HINT] To analyze missing cached jobs: python main.py --reanalyze")
-    generate_html(_visible_jobs(analyzed_jobs), fx_rate=_current_fx_rate())
+    generate_html(visible_jobs, fx_rate=_current_fx_rate())
     _open_dashboard(started_at)
+
+
+def _jobs_worth_analyzing(jobs: list[dict]) -> list[dict]:
+    """Do not pay to rate a listing that is probably or certainly gone."""
+    return [job for job in jobs if job.get("status") not in (STATUS_POSSIBLY_EXPIRED, STATUS_GONE)]
 
 
 def _visible_jobs(jobs: list[dict]) -> list[dict]:
@@ -660,7 +694,7 @@ def _initial_settings(available_sources: set[str]) -> dict:
 
 
 def _apply_search_settings(settings: dict, args: argparse.Namespace) -> None:
-    global _AI_ENABLED, _ACTIVE_SOURCES, _PREFERENCES, _FX_MODE, _FX_MANUAL_RATE
+    global _AI_ENABLED, _AI_MAX_PER_RUN, _ACTIVE_SOURCES, _PREFERENCES, _FX_MODE, _FX_MANUAL_RATE
     _PREFERENCES = preferences_from_settings(settings)
     job_filter.SEARCH_TERMS[:] = settings["search_terms"]
     distance_calculator._HOME_COORDINATES = None
@@ -668,7 +702,8 @@ def _apply_search_settings(settings: dict, args: argparse.Namespace) -> None:
         distance_calculator._HOME_COORDINATES = (settings["home_lat"], settings["home_lng"])
     dashboard_builder.HOME_CITY = settings["home_city"] or "Home"
     ai_analyzer.CANDIDATE_PROFILE_OVERRIDE = settings["candidate_profile"]
-    _AI_ENABLED = settings["ai_enabled"]
+    _AI_ENABLED = settings["ai_enabled"] or _ai_requested_on_command_line(args)
+    _AI_MAX_PER_RUN = settings.get("ai_max_per_run", DEFAULT_AI_MAX_PER_RUN)
     _FX_MODE = settings["fx_mode"]
     _FX_MANUAL_RATE = settings["fx_manual_eur_per_chf"]
     _ACTIVE_SOURCES = set(settings["sources"])
@@ -712,6 +747,31 @@ def _setup_search(args: argparse.Namespace) -> bool:
     return True
 
 
+def _exit_code_after_run(args: argparse.Namespace, valid_jobs: list[dict] | None) -> int:
+    """Exit code of a finished run, from the scan report (see exit_codes.py)."""
+    if not run_report.results:
+        if valid_jobs is None:
+            return EXIT_FAILURE
+        return EXIT_SUCCESS
+    report_code = exit_code_for_overall_status(run_report.overall_status())
+    if valid_jobs is None and not args.dry_run and report_code == EXIT_SUCCESS:
+        # The scan stopped before the end (Ctrl+C or a crash): never report a clean success.
+        return EXIT_PARTIAL
+    return report_code
+
+
+def _run_locked(args: argparse.Namespace, started_at: datetime) -> int:
+    """Scan, enrich, analyze and publish; the caller holds the run lock."""
+    valid_jobs = _run_scan_mode(args, started_at)
+    exit_code = _exit_code_after_run(args, valid_jobs)
+    if valid_jobs is None:
+        return exit_code
+    if _finish_scan_only(args, started_at):
+        return exit_code
+    _finalize_jobs(valid_jobs, started_at, retry_unanalyzable=args.reanalyze)
+    return exit_code
+
+
 def main() -> None:
     _configure_console()
     args = _parse_args()
@@ -726,15 +786,19 @@ def main() -> None:
             return
     except (ValueError, OSError, json.JSONDecodeError) as error:
         print(f"[CONFIG] Error: {error}")
-        sys.exit(1)
-    valid_jobs = _run_scan_mode(args, started_at)
-    if valid_jobs is None:
-        if args.background:
-            sys.exit(1)
-        return
-    if _finish_scan_only(args, started_at):
-        return
-    _finalize_jobs(valid_jobs, started_at, retry_unanalyzable=args.reanalyze)
+        sys.exit(EXIT_FAILURE)
+    try:
+        with run_lock.exclusive_run(LOCK_FILE):
+            exit_code = _run_locked(args, started_at)
+    except run_lock.AlreadyRunningError as error:
+        print(f"[BUSY] {error}")
+        sys.exit(EXIT_BUSY)
+    except cache_store.CacheFormatError as error:
+        print(f"[CACHE] {error}")
+        sys.exit(EXIT_FAILURE)
+    if exit_code != EXIT_SUCCESS:
+        print(f"[EXIT] Exit code {exit_code}: see scan_report.json (0 success, 1 failure, 2 partial, 3 busy).")
+        sys.exit(exit_code)
 
 
 if __name__ == "__main__":

@@ -262,8 +262,11 @@ def _page_says_no_results(page: Page) -> bool:
 
 
 def _report_outcome(site: str, jobs: list[dict], outcomes: list[str]) -> None:
-    """Set an explicit status when no listing was read; gates already set theirs."""
+    """Set an explicit status when the read was not complete; gates already set theirs."""
     if jobs:
+        if "unreadable" in outcomes:
+            # Some searches returned listings, one loaded a page whose cards were not understood.
+            run_report.set_status(site, "ok_partial", "a search page loaded but its listings could not be read")
         return
     if any(outcome in ("stopped", "navigation_failed") for outcome in outcomes):
         return

@@ -11,6 +11,9 @@ DEFAULT_RETENTION_DAYS = 60
 DEFAULT_VERIFY_LIMIT = 15
 MAX_RADIUS_KM = 300
 MAX_DAYS = 365
+# Paid AI calls are capped per run, newest listings first; the rest wait for the next run.
+DEFAULT_AI_MAX_PER_RUN = 25
+MAX_AI_PER_RUN = 200
 
 
 @dataclass(frozen=True)

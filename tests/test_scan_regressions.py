@@ -124,7 +124,8 @@ def test_project_dir_option_selects_project_directory(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     args = SimpleNamespace(project_dir=True, headless=False, timeout=0, auth="", background=False)
     monkeypatch.setattr(main, "_parse_args", lambda: args)
-    monkeypatch.setattr(main, "_run_scan_mode", lambda *_: None)
+    monkeypatch.setattr(main, "_run_locked", lambda *_: 0)
+    monkeypatch.setattr(main, "LOCK_FILE", tmp_path / ".jobscraper.lock")
     monkeypatch.setattr(main, "_setup_search", lambda *_: True)
 
     main.main()

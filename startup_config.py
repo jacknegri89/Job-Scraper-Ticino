@@ -12,10 +12,12 @@ from geo import ALL_REGIONS, REGION_TICINO
 from job_classifier import CONTRACT_TYPES, SENIORITY_LEVELS
 from job_filter import ALL_CATEGORIES
 from preferences import (
+    DEFAULT_AI_MAX_PER_RUN,
     DEFAULT_EXPIRY_DAYS,
     DEFAULT_RADIUS_KM,
     DEFAULT_RETENTION_DAYS,
     DEFAULT_VERIFY_LIMIT,
+    MAX_AI_PER_RUN,
     MAX_DAYS,
     MAX_RADIUS_KM,
 )
@@ -32,8 +34,10 @@ _LEGACY_KEYS = {"cities", "sources", "search_terms", "home_city", "home_lat", "h
 _CURRENT_KEYS = _LEGACY_KEYS - {"cities"} | {
     "schema_version", "regions", "radius_km", "include_places", "include_uncertain_location", "include_remote",
     "categories", "seniority_levels", "contract_types", "expiry_days", "retention_days",
-    "verify_limit", "fx_mode", "fx_manual_eur_per_chf",
+    "verify_limit", "fx_mode", "fx_manual_eur_per_chf", "ai_max_per_run",
 }
+# Added after schema 2 was released: a file saved without it is still valid and gets the default.
+_OPTIONAL_KEYS = {"ai_max_per_run"}
 
 
 def default_settings(sources, search_terms):
@@ -53,6 +57,7 @@ def default_settings(sources, search_terms):
         "home_lat": None,
         "home_lng": None,
         "ai_enabled": False,
+        "ai_max_per_run": DEFAULT_AI_MAX_PER_RUN,
         "candidate_profile": "",
         "headless": True,
         "timeout_ms": 30000,
@@ -89,8 +94,19 @@ def load_settings(path, allowed_sources):
         settings = json.load(settings_file)
     if isinstance(settings, dict) and settings.get("schema_version") is None:
         settings = _migrate_and_save(path, settings)
+    settings = with_default_optional_settings(settings)
     validate_settings(settings, allowed_sources)
     return settings
+
+
+def with_default_optional_settings(settings):
+    """Add the settings introduced after the file was written; nothing else is touched."""
+    if not isinstance(settings, dict):
+        return settings
+    completed = dict(settings)
+    if "ai_max_per_run" not in completed:
+        completed["ai_max_per_run"] = DEFAULT_AI_MAX_PER_RUN
+    return completed
 
 
 def _migrate_and_save(path, legacy_settings):
@@ -105,7 +121,8 @@ def _migrate_and_save(path, legacy_settings):
 def validate_settings(settings, allowed_sources):
     if not isinstance(settings, dict):
         raise ValueError("The settings must be a JSON object.")
-    if set(settings) != _CURRENT_KEYS:
+    present_keys = set(settings)
+    if not _CURRENT_KEYS - _OPTIONAL_KEYS <= present_keys or not present_keys <= _CURRENT_KEYS:
         raise ValueError("The settings contain missing or unknown fields.")
     if settings["schema_version"] != SETTINGS_SCHEMA_VERSION:
         raise ValueError("The settings were saved by a newer version of JobScraper.")
@@ -148,8 +165,9 @@ def _validate_numbers(settings):
     for key, minimum, maximum in (
         ("timeout_ms", 1000, 120000), ("attempts", 1, 3),
         ("expiry_days", 1, MAX_DAYS), ("retention_days", 1, MAX_DAYS), ("verify_limit", 0, 100),
+        ("ai_max_per_run", 1, MAX_AI_PER_RUN),
     ):
-        value = settings.get(key)
+        value = settings.get(key, DEFAULT_AI_MAX_PER_RUN if key == "ai_max_per_run" else None)
         if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
             raise ValueError(f"The {key} value must be between {minimum} and {maximum}.")
     if settings["retention_days"] < settings["expiry_days"]:
