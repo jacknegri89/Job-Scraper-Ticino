@@ -64,3 +64,11 @@ def test_panel_saves_valid_choices_and_rejects_invalid_ones(panel):
     status, _ = request(panel, "POST", f"/{panel.token}/save", json.dumps(settings), headers)
     assert status == 400
     assert startup_config.load_settings(startup_config.SETTINGS_FILE, panel.cities, panel.sources) == saved
+
+
+def test_panel_rejects_declared_oversized_body(panel):
+    # Only the header is oversized, so the client never sends a large body the server would leave unread.
+    headers = {"Content-Type": "application/json", "Origin": f"http://{panel.host}",
+               "X-CSRF-Token": panel.token, "Content-Length": str(setup_panel.MAX_BODY_BYTES + 1)}
+    status, _ = request(panel, "POST", f"/{panel.token}/save", None, headers)
+    assert status == 413
