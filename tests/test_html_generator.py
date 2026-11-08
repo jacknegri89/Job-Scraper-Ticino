@@ -120,3 +120,37 @@ def test_generate_html_with_no_jobs_shows_empty_state(
     assert 'class="empty show"' in page
     assert "<b>0</b><span>sources</span>" in page
     assert "fonts.googleapis.com" not in page
+
+
+def test_card_shows_route_ruler_only_for_known_city(monkeypatch: MonkeyPatch) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+
+    known_city_card = dashboard.build_card(_job(city="Mendrisio"))
+    unknown_city_card = dashboard.build_card(_job(city="Lugano"))
+
+    assert 'class="route"' in known_city_card
+    assert 'class="route"' not in unknown_city_card
+
+
+def test_job_text_that_looks_like_a_marker_is_not_replaced(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+    output_path = tmp_path / "index.html"
+
+    dashboard.generate_html([_job(title="Worker __EMPTY_SUB__ __COUNT__")], output_path)
+    page = output_path.read_text(encoding="utf-8")
+
+    assert "Worker __EMPTY_SUB__ __COUNT__" in page
+
+
+def test_page_blocks_external_resources(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+    output_path = tmp_path / "index.html"
+
+    dashboard.generate_html([_job()], output_path)
+    page = output_path.read_text(encoding="utf-8")
+
+    assert "Content-Security-Policy" in page
+    assert "default-src 'none'" in page

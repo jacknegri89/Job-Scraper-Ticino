@@ -32,7 +32,7 @@ Esegui dalla cartella del progetto:
 python main.py
 ```
 
-Il programma raccoglie gli annunci, recupera le descrizioni consentite, riutilizza i dati in cache, esegue l'eventuale analisi AI e genera `index.html`. La dashboard include ricerca, filtri, distanze indicative, stime salariali e collegamenti agli annunci. È progettata per l'uso locale: la pubblicazione online richiede una verifica separata di dati personali, privacy e contenuti dei portali.
+Il programma raccoglie gli annunci, recupera le descrizioni consentite, riutilizza i dati in cache, esegue l'eventuale analisi AI e genera `index.html`. La dashboard include ricerca, filtri per categoria, distanze indicative, stime salariali e collegamenti agli annunci; segue il tema chiaro o scuro del sistema e non carica risorse esterne. È progettata per l'uso locale: la pubblicazione online richiede una verifica separata di dati personali, privacy e contenuti dei portali.
 
 Lo script facoltativo `setup_task_scheduler.bat` configura su Windows un'attività giornaliera alle 08:00. Usa `--project-dir` per salvare i file nella cartella del progetto. Per aggiornare un'attività creata con una versione precedente, esegui nuovamente lo script.
 

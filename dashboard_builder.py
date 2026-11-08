@@ -1,9 +1,10 @@
 """
 Generate the interactive ``index.html`` job dashboard.
 
-Design: a readable dark theme with search, category chips, an AI match filter,
-sorting, and a responsive card grid. Each card also shows the distance from the
-home city configured in ``user_config.py``.
+Design: a road-sign header, a filter rail (search, sort, categories, AI match)
+and one ticket-style row per job. Each row shows the distance from the home
+city configured in ``user_config.py`` as a small route ruler. Light and dark
+themes follow the system setting.
 
 File layout:
   - presentation constants (CATEGORY, SOURCE_LABEL)
@@ -28,15 +29,19 @@ CategoryInfo = tuple[str, str]
 
 # category_id: (dot_color, dashboard_label). IDs come from job_filter.py.
 CATEGORY: dict[str, CategoryInfo] = {
-    "tech":         ("#79B8FF", "Tech / IT"),
-    "logistics":    ("#7EE2A8", "Logistics"),
-    "production":   ("#76E3EA", "Manufacturing"),
-    "food_service": ("#FF9EC1", "Food service"),
-    "cleaning":     ("#FFD47E", "Cleaning"),
-    "retail":       ("#FFB07C", "Retail"),
-    "transport":    ("#BFA9FF", "Transport"),
-    "other":        ("#9AA0A6", "Other"),
+    "tech":         ("#2B63B8", "Tech / IT"),
+    "logistics":    ("#2E8B57", "Logistics"),
+    "production":   ("#0F8A94", "Manufacturing"),
+    "food_service": ("#C23B78", "Food service"),
+    "cleaning":     ("#B58100", "Cleaning"),
+    "retail":       ("#D2641E", "Retail"),
+    "transport":    ("#6C52C4", "Transport"),
+    "other":        ("#7B858E", "Other"),
 }
+
+# The route ruler on each card spans this many km; one tick is drawn every TICK km.
+ROUTE_MAX_KM = 30
+ROUTE_TICK_KM = 5
 
 SOURCE_LABEL: dict[str, str] = {
     "jobs.ch":              "jobs.ch",
@@ -264,11 +269,31 @@ def _card_view(job: Job) -> dict[str, Any]:
 
 
 def _card_html(job: Job, view: dict[str, Any]) -> str:
-    return "\n".join([
-        _card_open(job, view), _card_header(view), _card_title(job),
-        _description_block(job), view["ai_html"], _card_meta(job, view),
-        _salary_block(job), _email_block(job), _apply_link(job), "</article>",
-    ])
+    main_column = [
+        '<div class="card-main">', _card_header(view), _card_title(job),
+        _description_block(job), view["ai_html"], "</div>",
+    ]
+    side_column = [
+        '<div class="card-side">', _card_meta(job, view), _route_block(view),
+        _salary_block(job), _email_block(job), _apply_link(job), "</div>",
+    ]
+    return "\n".join([_card_open(job, view), *main_column, *side_column, "</article>"])
+
+
+def _route_block(view: dict[str, Any]) -> str:
+    """Small ruler from the home city (left) to the job town (red pin)."""
+    km = view["km"]
+    if km is None:
+        return ""
+    position_percent = min(km / ROUTE_MAX_KM, 1) * 100
+    tick_percent = ROUTE_TICK_KM / ROUTE_MAX_KM * 100
+    home_city_label = _escape_html(HOME_CITY)
+    return (
+        '<div class="route" aria-hidden="true">'
+        f'<div class="route-line" style="--at:{position_percent:.1f}%;--km-step:{tick_percent:.2f}%"></div>'
+        f'<div class="route-ends"><span>{home_city_label}</span><span>{ROUTE_MAX_KM} km</span></div>'
+        "</div>"
+    )
 
 
 def _card_open(job: Job, view: dict[str, Any]) -> str:
@@ -282,7 +307,7 @@ def _card_open(job: Job, view: dict[str, Any]) -> str:
 def _card_header(view: dict[str, Any]) -> str:
     return (
         '<div class="card-head">'
-        f'<span class="card-cat"><span class="cat-dot"></span>{view["category_label"]}</span>'
+        f'<span class="card-cat">{view["category_label"]}</span>'
         f'<span class="card-source">{view["source"]}</span></div>'
     )
 
@@ -311,7 +336,7 @@ def _meta_row(label: str, value: str) -> str:
 
 
 def _apply_link(job: Job) -> str:
-    return f'<a class="apply-btn" href="{_safe_url(job)}" target="_blank" rel="noopener noreferrer">Apply <span class="arrow">&rarr;</span></a>'
+    return f'<a class="apply-btn" href="{_safe_url(job)}" target="_blank" rel="noopener noreferrer">View listing <span class="arrow">&rarr;</span></a>'
 
 
 # ----------------------------------------------------------------
@@ -323,271 +348,306 @@ _TEMPLATE = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
 <title>Ticino Jobs - cross-border dashboard</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23161B22%22/><circle cx=%2232%22 cy=%2232%22 r=%2210%22 fill=%22%233FB950%22/></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2212%22 fill=%22%230B3D91%22/><path d=%22M14 32h34M37 20l12 12-12 12%22 fill=%22none%22 stroke=%22%23fff%22 stroke-width=%226%22 stroke-linejoin=%22round%22/></svg>">
 <style>
+/* Palette: cold stone paper, ink, Ticino blue for the header, Ticino red for the one action. */
 :root {
-  --bg:     #0E1116;
-  --panel:  #161B22;
-  --panel2: #1C232C;
-  --line:   #262D37;
-  --line2:  #39414D;
-  --text:   #E6EDF3;
-  --muted:  #9BA4AF;
-  --faint:  #9BA4AF;
-  --green:  #3FB950;
-  --green-dim: rgba(63,185,80,.12);
-  --red:    #F47067;
-  --font:   -apple-system, 'Segoe UI', sans-serif;
+  --paper:  #E8EBE9;
+  --card:   #FBFBF9;
+  --card-2: #F1F3F1;
+  --ink:    #18212B;
+  --ink-2:  #46515C;
+  --ink-3:  #63707B;
+  --rule:   #CBD1D3;
+  --rule-2: #98A2A8;
+  --blue:   #0B3D91;
+  --red:    #C8102E;
+  --red-hi: #A50D26;
+  --ok:     #1B6B47;
+  --ok-bg:  #E0EFE6;
+  --no-bg:  #EEF0EF;
+  --focus:  #0B63E5;
+  --sans:   "Bahnschrift", "DIN Alternate", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono:   ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper:  #10161B;
+    --card:   #182027;
+    --card-2: #1F2831;
+    --ink:    #E8ECEF;
+    --ink-2:  #B2BCC4;
+    --ink-3:  #8E9AA4;
+    --rule:   #2C3640;
+    --rule-2: #4C5963;
+    --blue:   #123F8C;
+    --ok:     #67C795;
+    --ok-bg:  #17301F;
+    --no-bg:  #1C242B;
+    --focus:  #7DB2FF;
+  }
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-:focus-visible { outline: 3px solid #79B8FF; outline-offset: 2px; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 body {
-  background: var(--bg); color: var(--text);
-  font-family: var(--font); font-size: 14px; line-height: 1.5;
+  background: var(--paper); color: var(--ink);
+  font-family: var(--sans); font-size: 14.5px; line-height: 1.5;
 }
-::selection { background: var(--green); color: #fff; }
+[hidden] { display: none !important; }
 
-/* Header */
-header {
-  max-width: 1280px; margin: 0 auto;
-  padding: 40px 24px 28px;
-}
-.h-top { display: flex; justify-content: space-between; align-items: baseline;
-         flex-wrap: wrap; gap: 8px; }
-h1 { font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
-h1 .dot { color: var(--green); }
-.updated { color: var(--faint); font-size: 13px; }
-.subtitle { color: var(--muted); margin-top: 6px; font-size: 14px; }
-
-.stats { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 22px; }
-.stat {
-  background: var(--panel); border: 1px solid var(--line);
-  border-radius: 12px; padding: 14px 22px; min-width: 130px;
-}
-.stat b { display: block; font-size: 26px; font-weight: 700; line-height: 1.2; }
-.stat.green b { color: var(--green); }
-.stat span { color: var(--faint); font-size: 12px; font-weight: 500; }
-
-/* Toolbar */
-.toolbar {
-  position: sticky; top: 0; z-index: 50;
-  background: rgba(14,17,22,.92);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
-}
-.toolbar-in {
-  max-width: 1280px; margin: 0 auto; padding: 12px 24px;
-  display: flex; flex-direction: column; gap: 10px;
-}
-.row1 { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-#search {
-  flex: 1; min-width: 220px; max-width: 420px;
-  background: var(--panel); color: var(--text);
-  border: 1px solid var(--line); border-radius: 8px;
-  padding: 9px 14px; font-size: 13.5px; font-family: var(--font);
-}
-#search:focus { border-color: var(--green); }
-#search::placeholder { color: var(--faint); }
-#sort {
-  background: var(--panel); color: var(--muted);
-  border: 1px solid var(--line); border-radius: 8px;
-  padding: 9px 10px; font-size: 13px; font-family: var(--font);
-  cursor: pointer;
-}
-.count { color: var(--faint); font-size: 13px; white-space: nowrap; }
-.count b { color: var(--green); }
-
-.chips { display: flex; flex-wrap: wrap; gap: 7px; }
-.chip {
-  display: inline-flex; align-items: center; gap: 7px;
-  background: var(--panel); color: var(--muted);
-  border: 1px solid var(--line); border-radius: 999px;
-  padding: 6px 13px; cursor: pointer;
-  font-family: var(--font); font-size: 12.5px; font-weight: 600;
-}
-.chip:hover { border-color: var(--line2); color: var(--text); }
-.chip.active { background: var(--text); color: var(--bg); border-color: var(--text); }
-.chip .n { opacity: .55; font-weight: 500; }
-.chip-dot { width: 7px; height: 7px; border-radius: 50%;
-            background: var(--chip-accent, var(--faint)); }
-.chip-ai { border-color: rgba(63,185,80,.4); color: var(--green); }
-.chip-ai.active { background: var(--green); color: var(--bg); border-color: var(--green); }
-
-/* Card grid */
-main { max-width: 1280px; margin: 0 auto; padding: 24px 24px 80px; }
-.grid {
+/* Header: a road sign for the Mendrisiotto */
+.sign { background: var(--blue); color: #fff; }
+.sign-in {
+  max-width: 1240px; margin: 0 auto; padding: 30px 24px 26px;
   display: grid; gap: 14px;
-  grid-template-columns: repeat(auto-fill, minmax(min(330px, 100%), 1fr));
 }
+.sign-top { display: flex; justify-content: space-between; align-items: baseline;
+            flex-wrap: wrap; gap: 6px 24px; }
+h1 {
+  font-size: 40px; font-weight: 700; line-height: 1; letter-spacing: .01em;
+  text-transform: uppercase; font-stretch: 75%;
+}
+h1 .to { display: inline-block; margin-left: 10px; color: #fff; opacity: .7; }
+.updated { font-family: var(--mono); font-size: 12px; opacity: .8; }
+.subtitle { max-width: 62ch; opacity: .88; }
+.tally { display: flex; flex-wrap: wrap; gap: 6px 28px; padding-top: 14px;
+         border-top: 1px solid rgba(255,255,255,.35); }
+.tally-item { display: flex; align-items: baseline; gap: 8px; }
+.tally-item b { font-family: var(--mono); font-size: 20px; font-weight: 600;
+                font-variant-numeric: tabular-nums; }
+.tally-item span { font-size: 12.5px; opacity: .8; text-transform: uppercase; letter-spacing: .06em; }
+.sign::after { content: ""; display: block; height: 5px; background: var(--red); }
+
+/* Page: filter rail on the left, listings on the right */
+.page {
+  max-width: 1240px; margin: 0 auto; padding: 28px 24px 80px;
+  display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: 36px; align-items: start;
+}
+.rail { position: sticky; top: 16px; display: grid; gap: 18px; }
+.field-label { display: block; margin-bottom: 6px; font-size: 11px; font-weight: 700;
+               text-transform: uppercase; letter-spacing: .09em; color: var(--ink-3); }
+#search, #sort {
+  width: 100%; background: var(--card); color: var(--ink);
+  border: 1px solid var(--rule-2); border-radius: 3px;
+  padding: 9px 11px; font: inherit; font-size: 14px;
+}
+#search::placeholder { color: var(--ink-3); }
+#search:focus { border-color: var(--ink); }
+.found { font-size: 13px; color: var(--ink-2); }
+.found b { font-family: var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.chips { display: grid; gap: 2px; }
+.chip {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  background: transparent; color: var(--ink-2); font: inherit; font-size: 14px;
+  border: 0; border-left: 3px solid transparent; border-radius: 0;
+  padding: 7px 10px; cursor: pointer;
+}
+.chip:hover { background: var(--card-2); color: var(--ink); }
+.chip[aria-pressed="true"] { border-left-color: var(--ink); background: var(--card);
+                             color: var(--ink); font-weight: 700; }
+.chip .n { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--ink-3);
+           font-variant-numeric: tabular-nums; }
+.chip-dot { width: 9px; height: 9px; background: var(--chip-accent, var(--ink-3)); flex: none; }
+.chip-ai { margin-top: 8px; border: 1px solid var(--ok); color: var(--ok); border-radius: 3px;
+           border-left-width: 3px; font-weight: 600; }
+.chip-ai:hover { background: var(--ok-bg); color: var(--ok); }
+.chip-ai[aria-pressed="true"] { background: var(--ok); color: var(--card); border-color: var(--ok); }
+.chip-ai[aria-pressed="true"] .n { color: var(--card); }
+
+/* Listings */
+.list { display: grid; gap: 12px; }
 .card {
-  background: var(--panel); border: 1px solid var(--line);
-  border-radius: 14px; padding: 20px;
-  display: flex; flex-direction: column; gap: 12px;
-  transition: border-color .15s, transform .15s;
+  --accent: var(--ink-3);
+  display: grid; grid-template-columns: minmax(0, 1fr) 292px;
+  background: var(--card); border: 1px solid var(--rule);
+  border-left: 5px solid var(--accent); border-radius: 3px;
 }
-.card:hover { border-color: var(--line2); transform: translateY(-2px); }
-.card[data-ai="not_match"] { border-color: var(--line2); }
-
-.card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.card-cat {
-  display: inline-flex; align-items: center; gap: 7px;
-  font-size: 11.5px; font-weight: 700; color: var(--muted);
-  text-transform: uppercase; letter-spacing: .05em;
+.card:hover { border-color: var(--rule-2); border-left-color: var(--accent); }
+.card-main { padding: 20px 24px 22px; display: grid; gap: 12px; align-content: start; min-width: 0; }
+.card-side {
+  padding: 20px; display: flex; flex-direction: column; gap: 16px;
+  border-left: 2px dashed var(--rule); background: var(--card-2);
 }
-.cat-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
-.card-source {
-  font-size: 11px; font-weight: 600; color: var(--faint);
-  border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px;
-  white-space: nowrap;
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.card-cat { font-size: 11.5px; font-weight: 700; color: var(--ink-2);
+            text-transform: uppercase; letter-spacing: .08em; }
+.card-source { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
+.card-title { font-size: 21px; font-weight: 700; line-height: 1.2; letter-spacing: -.005em; }
+.card-company { color: var(--ink-2); margin-top: -6px; }
+.card-desc { color: var(--ink-2); max-width: 72ch; line-height: 1.6; }
+
+.ai { display: flex; gap: 10px; align-items: flex-start; }
+.ai-ico { flex: none; width: 20px; height: 20px; margin-top: 1px; border-radius: 50%;
+          display: grid; place-items: center; font-size: 11px; font-weight: 700;
+          background: var(--ok); color: var(--card); }
+.ai-no .ai-ico { background: var(--ink-3); }
+.ai-tag { font-weight: 700; font-size: 13px; color: var(--ok); }
+.ai-no .ai-tag { color: var(--ink-3); }
+.ai-why { font-size: 13px; color: var(--ink-2); margin-top: 2px; max-width: 66ch; }
+
+/* Side column: facts, route ruler, pay, action */
+.card-meta { display: grid; gap: 0; }
+.card-meta > div { display: flex; justify-content: space-between; gap: 12px;
+                   padding: 6px 0; border-bottom: 1px dotted var(--rule-2); }
+.meta-k { font-size: 12px; color: var(--ink-3); }
+.meta-v { font-family: var(--mono); font-size: 13px; font-weight: 600; text-align: right;
+          font-variant-numeric: tabular-nums; }
+.route { display: grid; gap: 4px; }
+.route-line {
+  position: relative; height: 12px;
+  border-bottom: 2px solid var(--ink);
+  background: repeating-linear-gradient(90deg, var(--rule-2) 0 1px, transparent 1px var(--km-step));
+  background-size: 100% 6px; background-repeat: no-repeat; background-position: bottom;
 }
-.card-title { font-size: 16.5px; font-weight: 700; line-height: 1.3; }
-.card-company { color: var(--muted); font-size: 13px; margin-top: -6px; }
-
-.card-desc {
-  color: #C9D1D9; font-size: 13px; line-height: 1.65;
-  background: var(--panel2); border-radius: 10px; padding: 12px 14px;
+.route-line::after {
+  content: ""; position: absolute; bottom: -6px; left: var(--at); width: 10px; height: 10px;
+  margin-left: -5px; background: var(--red); border: 2px solid var(--card-2); border-radius: 50%;
+  box-sizing: content-box;
 }
+.route-ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-3); }
 
-.ai { display: flex; gap: 10px; padding: 11px 14px; border-radius: 10px; }
-.ai-ok { background: var(--green-dim); }
-.ai-no { background: rgba(244,112,103,.08); }
-.ai-ico { font-size: 13px; }
-.ai-ok .ai-ico { color: var(--green); }
-.ai-no .ai-ico { color: var(--red); }
-.ai-tag { font-size: 12.5px; font-weight: 700; }
-.ai-ok .ai-tag { color: var(--green); }
-.ai-no .ai-tag { color: var(--red); }
-.ai-why { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+.salary { font-size: 12.5px; display: grid; gap: 4px;
+          background: var(--card); border: 1px solid var(--rule); padding: 10px 12px; }
+.sal-head { font-family: var(--sans); font-size: 11px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: .09em; color: var(--ink-3); padding-bottom: 4px; }
+.sal-row { display: flex; justify-content: space-between; gap: 10px; color: var(--ink-2); }
+.sal-num { font-family: var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sal-row.deduct .sal-num { color: var(--ink-2); }
+.sal-net { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px;
+           padding: 7px 8px; background: var(--ink); color: var(--card);
+           font-size: 13px; font-weight: 700; }
+.sal-net span:last-child { font-family: var(--mono); white-space: nowrap; }
+.sal-note { font-family: var(--sans); font-size: 11px; color: var(--ink-3); line-height: 1.35; }
 
-.card-meta {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
-  border-top: 1px solid var(--line); padding-top: 12px; margin-top: auto;
-}
-.meta-k { display: block; font-size: 10.5px; color: var(--faint);
-          font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
-          margin-bottom: 2px; }
-.meta-v { font-size: 13px; font-weight: 600; }
-
-.salary { background: var(--panel2); border-radius: 10px;
-          padding: 13px 14px 10px; display: flex; flex-direction: column; gap: 6px; }
-.sal-head { font-size: 10.5px; color: var(--faint); font-weight: 700;
-            text-transform: uppercase; letter-spacing: .05em;
-            border-bottom: 1px solid var(--line); padding-bottom: 7px; }
-.sal-row { display: flex; justify-content: space-between; font-size: 12.5px;
-           color: var(--muted); }
-.sal-num { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
-.sal-row.deduct .sal-num { color: var(--red); }
-.sal-net { display: flex; justify-content: space-between; align-items: center;
-           background: var(--green); color: var(--bg); font-size: 13px; font-weight: 700;
-           padding: 8px 12px; border-radius: 8px; margin-top: 4px; }
-.sal-note { font-size: 10px; color: var(--faint); }
-
-.email-link {
-  font-size: 12.5px; font-weight: 600; color: var(--muted);
-  text-decoration: none; border: 1px solid var(--line); border-radius: 8px;
-  padding: 8px 12px; text-align: center; word-break: break-all;
-}
-.email-link:hover { border-color: var(--green); color: var(--green); }
+.email-link { font-size: 13px; color: var(--ink-2); word-break: break-all; }
+.email-link:hover { color: var(--ink); }
 
 .apply-btn {
-  display: flex; justify-content: center; align-items: center; gap: 8px;
-  background: var(--green); color: var(--bg);
-  font-size: 13.5px; font-weight: 700;
-  padding: 11px; border-radius: 8px; text-decoration: none;
+  margin-top: auto; display: flex; justify-content: space-between; align-items: center;
+  background: var(--red); color: #fff; text-decoration: none;
+  font-weight: 700; font-size: 14px; padding: 11px 14px; border-radius: 3px;
 }
-.apply-btn:hover { filter: brightness(1.12); }
+.apply-btn:hover { background: var(--red-hi); }
 .apply-btn .arrow { transition: transform .15s; }
 .apply-btn:hover .arrow { transform: translateX(3px); }
 
-/* Empty state and footer */
-.empty { display: none; text-align: center; padding: 70px 20px; color: var(--muted); }
+.empty { display: none; padding: 56px 0; color: var(--ink-2); }
 .empty.show { display: block; }
-.empty h3 { font-size: 22px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+.empty h3 { font-size: 22px; font-weight: 700; color: var(--ink); margin-bottom: 6px; }
 
 footer {
-  border-top: 1px solid var(--line); text-align: center;
-  padding: 26px 24px 40px; color: var(--faint); font-size: 12px; line-height: 1.9;
+  max-width: 1240px; margin: 0 auto; padding: 22px 24px 44px;
+  border-top: 1px solid var(--rule); color: var(--ink-3); font-size: 12.5px; line-height: 1.8;
 }
 
-::-webkit-scrollbar { width: 9px; }
-::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 99px; }
-
-@media (max-width: 640px) {
-  .card-meta { grid-template-columns: 1fr 1fr; }
-  h1 { font-size: 22px; }
+@media (max-width: 900px) {
+  .page { grid-template-columns: 1fr; gap: 20px; padding-top: 20px; }
+  .rail { position: static; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { width: auto; border: 1px solid var(--rule-2); border-radius: 999px; padding: 6px 12px; }
+  .chip[aria-pressed="true"] { border-color: var(--ink); }
+  .chip-ai { margin-top: 0; }
+  h1 { font-size: 32px; }
+}
+@media (max-width: 720px) {
+  .card { grid-template-columns: 1fr; }
+  .card-side { border-left: 0; border-top: 2px dashed var(--rule); }
+  .card-main { padding: 18px 18px 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .apply-btn .arrow { transition: none; }
 }
 </style>
 </head>
 <body>
 
-<header>
-  <div class="h-top">
-    <h1><span class="dot">&bull;</span> Ticino Jobs</h1>
-    <span class="updated">Last updated __NOW__</span>
-  </div>
-  <p class="subtitle">Jobs from __NSOURCES__ Swiss portals, filtered for the
-     Mendrisio district. Distances are calculated from __HOME_CITY__ as straight-line estimates.</p>
-  <div class="stats">
-    <div class="stat"><b>__COUNT__</b><span>cached jobs</span></div>
-    <div class="stat green"><b>__N_MATCHES__</b><span>good matches</span></div>
-    <div class="stat"><b>__NSOURCES__</b><span>sources</span></div>
+<header class="sign">
+  <div class="sign-in">
+    <div class="sign-top">
+      <h1>Ticino Jobs<span class="to">&rarr; Mendrisiotto</span></h1>
+      <span class="updated">Updated __NOW__</span>
+    </div>
+    <p class="subtitle">Listings from __NSOURCES__ Swiss portals, filtered for the
+       Mendrisio district. Distances are straight-line estimates from __HOME_CITY__.</p>
+    <div class="tally">
+      <div class="tally-item"><b>__COUNT__</b><span>cached jobs</span></div>
+      <div class="tally-item"><b>__N_MATCHES__</b><span>good matches</span></div>
+      <div class="tally-item"><b>__NSOURCES__</b><span>sources</span></div>
+    </div>
   </div>
 </header>
 
-<div class="toolbar">
-  <div class="toolbar-in">
-    <div class="row1">
-      <input id="search" type="text" aria-label="Search jobs" placeholder="Search title, company, or city...">
-      <select id="sort" aria-label="Sort jobs">
+<div class="page">
+  <aside class="rail" aria-label="Filters">
+    <div>
+      <label class="field-label" for="search">Search</label>
+      <input id="search" type="search" placeholder="Title, company or city" autocomplete="off">
+    </div>
+    <div>
+      <label class="field-label" for="sort">Sort by</label>
+      <select id="sort">
         <option value="date">Newest</option>
         <option value="km">Nearest</option>
       </select>
-      <span class="count"><b id="visible-n">__COUNT__</b> results</span>
     </div>
-    <div class="chips">
-      <button class="chip active" data-cat="all">All <span class="n">__COUNT__</span></button>
-      __CAT_CHIPS__
-      <button class="chip chip-ai" id="chip-ai">&#10003; Good matches__CHIP_AI_N__</button>
+    <p class="found" aria-live="polite"><b id="visible-n">__COUNT__</b> results</p>
+    <div>
+      <span class="field-label" id="field-label">Field</span>
+      <div class="chips" role="group" aria-labelledby="field-label">
+        <button class="chip" data-cat="all" aria-pressed="true">All <span class="n">__COUNT__</span></button>
+        __CAT_CHIPS__
+        <button class="chip chip-ai" id="chip-ai" aria-pressed="false">&#10003; Good matches__CHIP_AI_N__</button>
+      </div>
     </div>
-  </div>
-</div>
+  </aside>
 
-<main>
-  <div class="grid" id="grid">
+  <main>
+    <div class="list" id="grid">
 __CARDS__
-  </div>
-  <div class="empty" id="empty">
-    <h3>No results</h3>
-    <p>__EMPTY_SUB__</p>
-  </div>
-</main>
+    </div>
+    <div class="empty" id="empty">
+      <h3>No jobs match</h3>
+      <p>__EMPTY_SUB__</p>
+    </div>
+  </main>
+</div>
 
 <footer>
   Sources: __SOURCELIST__<br>
-  Cross-border dashboard &middot; salary and distance figures are indicative estimates
+  Salary and distance figures are indicative estimates, not offers.
 </footer>
 
 <script>
 "use strict";
 
 const state = { category: "all", aiOnly: false, query: "" };
-const grid  = document.getElementById("grid");
+const grid = document.getElementById("grid");
 const cards = Array.from(grid.querySelectorAll(".card"));
+const chips = Array.from(document.querySelectorAll(".chip"));
 
 // Original order means newest first, as sorted by the generator.
 cards.forEach((card, index) => { card.dataset.order = index; });
 
+function cardMatches(card) {
+  const okCategory = state.category === "all" || card.dataset.category === state.category;
+  const okAI = !state.aiOnly || card.dataset.ai === "match";
+  const okQuery = !state.query || card.dataset.search.includes(state.query);
+  return okCategory && okAI && okQuery;
+}
+
 function applyFilters() {
   let visible = 0;
   for (const card of cards) {
-    const okCategory = state.category === "all" || card.dataset.category === state.category;
-    const okAI = !state.aiOnly || card.dataset.ai === "match";
-    const okQuery = !state.query || card.dataset.search.includes(state.query);
-    const show = okCategory && okAI && okQuery;
-    card.style.display = show ? "" : "none";
-    if (show) visible++;
+    const show = cardMatches(card);
+    card.hidden = !show;
+    if (show) {
+      visible++;
+    }
   }
   document.getElementById("visible-n").textContent = visible;
   document.getElementById("empty").classList.toggle("show", visible === 0);
@@ -600,32 +660,36 @@ function applySort(mode) {
   } else {
     sorted.sort((a, b) => a.dataset.order - b.dataset.order);
   }
-  for (const card of sorted) grid.appendChild(card);
+  for (const card of sorted) {
+    grid.appendChild(card);
+  }
 }
 
-// Live search.
 document.getElementById("search").addEventListener("input", (event) => {
   state.query = event.target.value.toLowerCase().trim();
   applyFilters();
 });
 
-// Sorting.
 document.getElementById("sort").addEventListener("change", (event) => {
   applySort(event.target.value);
 });
 
-// Category and AI chips use one delegated listener.
+// Category and AI chips share one delegated listener.
 document.querySelector(".chips").addEventListener("click", (event) => {
   const chip = event.target.closest(".chip");
-  if (!chip) return;
-
+  if (!chip) {
+    return;
+  }
   if (chip.id === "chip-ai") {
     state.aiOnly = !state.aiOnly;
-    chip.classList.toggle("active", state.aiOnly);
+    chip.setAttribute("aria-pressed", String(state.aiOnly));
   } else {
     state.category = chip.dataset.cat;
-    document.querySelectorAll(".chip[data-cat]").forEach(button => button.classList.remove("active"));
-    chip.classList.add("active");
+    for (const button of chips) {
+      if (button.dataset.cat) {
+        button.setAttribute("aria-pressed", String(button === chip));
+      }
+    }
   }
   applyFilters();
 });
@@ -664,7 +728,7 @@ def _category_chips(counts: dict[str, int]) -> str:
         if count == 0:
             continue
         chips.append(
-            f'<button class="chip" data-cat="{category_id}" style="--chip-accent:{color}">'
+            f'<button class="chip" data-cat="{category_id}" aria-pressed="false" style="--chip-accent:{color}">'
             f'<span class="chip-dot"></span>{label} <span class="n">{count}</span></button>'
         )
     return "\n      ".join(chips)
@@ -718,10 +782,12 @@ def _empty_subtitle(jobs: list[Job]) -> str:
 
 
 def _fill_template(replacements: dict[str, str]) -> str:
-    page = _TEMPLATE
-    for marker, value in replacements.items():
-        page = page.replace(marker, value)
-    return page
+    # One pass over the template: text inserted by a marker is never scanned again,
+    # so a job title that contains "__COUNT__" cannot be rewritten by a later marker.
+    def replace_marker(match: re.Match) -> str:
+        return replacements.get(match.group(0), match.group(0))
+
+    return re.sub(r"__[A-Z_]+__", replace_marker, _TEMPLATE)
 
 
 def _show_empty_state(page: str) -> str:
