@@ -61,14 +61,22 @@ def scrape_jobs_ch(
     terms = search_terms or SEARCH_TERMS
     all_jobs: list[dict[str, str]] = []
     seen_urls: set[str] = set()
-    page = new_stealth_page(context)
-    try:
-        for term in terms:
+    for term in terms:
+        # A fresh page per term: if one page crashes, the other terms are not lost.
+        page = new_stealth_page(context)
+        try:
             _scrape_term(page, term, seen_urls, all_jobs)
-        print(f"[jobs.ch] Raw total: {len(all_jobs)}")
-        return all_jobs
-    finally:
+        finally:
+            _close_page_quietly(page)
+    print(f"[jobs.ch] Raw total: {len(all_jobs)}")
+    return all_jobs
+
+
+def _close_page_quietly(page: Page) -> None:
+    try:
         page.close()
+    except Exception as exc:
+        print(f"[WARN] jobs.ch page could not be closed: {exc}")
 
 
 def _scrape_term(
@@ -78,9 +86,14 @@ def _scrape_term(
     all_jobs: list[dict[str, str]],
 ) -> None:
     print(f"[jobs.ch] Searching: '{term}'")
+    term_urls: set[str] = set()
     for page_num in range(1, MAX_PAGES + 1):
-        if not _add_page_jobs(page, term, page_num, seen_urls, all_jobs):
+        page_urls = _add_page_jobs(page, term, page_num, seen_urls, all_jobs)
+        # Stop on a failed or empty page, and when the portal repeats results already
+        # seen for this term. Jobs found by other terms do not stop the search.
+        if not page_urls or term_urls.issuperset(page_urls):
             break
+        term_urls.update(page_urls)
 
 
 def _add_page_jobs(
@@ -89,15 +102,17 @@ def _add_page_jobs(
     page_num: int,
     seen_urls: set[str],
     all_jobs: list[dict[str, str]],
-) -> bool:
+) -> list[str]:
+    """Load one results page and return the URLs found on it (empty on failure)."""
     url = SEARCH_URL.format(term=urllib.parse.quote_plus(term), page=page_num)
     try:
         jobs = _load_page_jobs(page, url)
     except Exception as exc:
         print(f"[WARN] {url}: {exc}")
         run_report.set_status("jobs.ch", "ok_partial", f"Page could not be loaded: {type(exc).__name__}")
-        return False
-    return _add_new_jobs(jobs, page_num, seen_urls, all_jobs)
+        return []
+    _add_new_jobs(jobs, page_num, seen_urls, all_jobs)
+    return [job["url"] for job in jobs]
 
 
 def _load_page_jobs(page: Page, url: str) -> list[dict[str, str]]:
