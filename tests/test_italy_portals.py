@@ -90,9 +90,10 @@ def test_a_block_keeps_its_own_status(report: RunReport) -> None:
 
 
 def test_found_jobs_never_get_an_empty_status(report: RunReport) -> None:
+    # Listings were read, so the source is not empty; one unreadable search makes it partial, not "ok".
     italy_portals._report_outcome("indeed.it", [{"url": "x"}], ["found", "unreadable"])
     report.finish("indeed.it", 1, 1)
-    assert report.results[0].status == "ok"
+    assert report.results[0].status == "ok_partial"
 
 
 def test_overall_status_needs_every_site_read_for_success() -> None:

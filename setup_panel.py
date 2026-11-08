@@ -14,7 +14,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import geo
+import run_lock
 import startup_config
+from exit_codes import EXIT_BUSY, EXIT_PARTIAL, EXIT_SUCCESS
 from job_classifier import CONTRACT_TYPES, SENIORITY_LEVELS
 from job_filter import ALL_CATEGORIES
 from urllib.parse import parse_qs, urlsplit
@@ -22,9 +24,41 @@ from urllib.parse import parse_qs, urlsplit
 PROJECT_DIR = Path(__file__).resolve().parent
 PANEL_FILE = PROJECT_DIR / "setup_panel.html"
 LOG_FILE = PROJECT_DIR / "scraper.log"
+LOCK_PATH = PROJECT_DIR / run_lock.LOCK_FILE_NAME
 MAX_BODY_BYTES = 16384
 MAX_REQUESTS_PER_MINUTE = 30
 MAX_PLACE_QUERY_LENGTH = 80
+MAX_LOG_BYTES = 5 * 1024 * 1024
+
+
+def content_security_policy(script_nonce=None):
+    """The panel script runs only with this response's one-time nonce; JSON replies run no script."""
+    script_source = "'none'"
+    if script_nonce:
+        script_source = f"'nonce-{script_nonce}'"
+    return ("default-src 'none'; style-src 'unsafe-inline'; script-src " + script_source +
+            "; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+
+
+def rotate_log_if_large(log_path, max_bytes=MAX_LOG_BYTES):
+    """Keep scraper.log from growing for ever: past the limit it becomes scraper.log.old."""
+    try:
+        if log_path.stat().st_size <= max_bytes:
+            return
+        os.replace(log_path, log_path.with_name(log_path.name + ".old"))
+    except OSError:
+        pass
+
+
+def status_for_exit_code(exit_code):
+    """Panel wording for the exit code of a finished search (see exit_codes.py)."""
+    if exit_code == EXIT_SUCCESS:
+        return "complete"
+    if exit_code == EXIT_PARTIAL:
+        return "partial"
+    if exit_code == EXIT_BUSY:
+        return "busy"
+    return "error"
 
 
 class LocalPanelServer(ThreadingHTTPServer):
@@ -47,7 +81,7 @@ class LocalPanelServer(ThreadingHTTPServer):
             result = self.process.poll()
             if result is None:
                 return "running"
-            return "complete" if result == 0 else "error"
+            return status_for_exit_code(result)
 
     def save(self, settings):
         startup_config.validate_settings(settings, self.sources)
@@ -62,12 +96,15 @@ class LocalPanelServer(ThreadingHTTPServer):
         with self.lock:
             if self.process is not None and self.process.poll() is None:
                 raise ValueError("A search is already running.")
+            if run_lock.is_running(LOCK_PATH):
+                raise ValueError("A search is already running (started from another window or a scheduled task).")
             startup_config.save_settings(startup_config.SETTINGS_FILE, settings)
             self.settings = settings
+            rotate_log_if_large(LOG_FILE)
             command = [sys.executable, str(PROJECT_DIR / "main.py"), "--background", "--headless", "--project-dir"]
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             with LOG_FILE.open("a", encoding="utf-8") as log_file:
-                self.process = subprocess.Popen(
+                self.process = subprocess.Popen(  # noqa: S603 - fixed command: this interpreter runs main.py
                     command, cwd=PROJECT_DIR, stdin=subprocess.DEVNULL,
                     stdout=log_file, stderr=subprocess.STDOUT, creationflags=flags,
                 )
@@ -87,7 +124,7 @@ class PanelHandler(BaseHTTPRequestHandler):
     def log_message(self, format_string, *args):
         pass
 
-    def _headers(self, status, content_type):
+    def _headers(self, status, content_type, script_nonce=None):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
@@ -95,7 +132,7 @@ class PanelHandler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+        self.send_header("Content-Security-Policy", content_security_policy(script_nonce))
         self.end_headers()
 
     def _send_json(self, status, payload):
@@ -129,8 +166,10 @@ class PanelHandler(BaseHTTPRequestHandler):
                 "categories": list(ALL_CATEGORIES), "seniority_levels": list(SENIORITY_LEVELS),
                 "contract_types": list(CONTRACT_TYPES)}
         encoded_data = json.dumps(data, ensure_ascii=True).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+        nonce = secrets.token_urlsafe(16)
         html = PANEL_FILE.read_text(encoding="utf-8").replace("__PANEL_DATA__", encoded_data)
-        self._headers(200, "text/html; charset=utf-8")
+        html = html.replace("<script>", f'<script nonce="{nonce}">')
+        self._headers(200, "text/html; charset=utf-8", script_nonce=nonce)
         self.wfile.write(html.encode("utf-8"))
 
     def _read_body(self):

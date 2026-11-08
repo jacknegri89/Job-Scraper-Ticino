@@ -13,6 +13,7 @@ Live structure:
 from playwright.sync_api import BrowserContext, Page
 
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, click_load_more, retry
+from scrapers.pagination import report_gate_if_any
 from job_filter import categorize_job
 
 BASE_URL = "https://www.randstad.ch"
@@ -77,6 +78,8 @@ def _scrape_jobs(page: Page) -> list[dict[str, str]]:
     _load_all_cards(page)
     jobs = _build_jobs(page.evaluate(_JS_EXTRACT))
     print(f"  [randstad.ch] {len(jobs)} jobs found")
+    if not jobs:
+        report_gate_if_any(page, "randstad.ch")
     return jobs
 
 

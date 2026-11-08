@@ -1,4 +1,5 @@
-playwright>=1.40.0
-playwright-stealth>=1.0.0
-pytest>=7.0.0
-openai>=1.0.0
+# Runtime dependencies, pinned to the versions the tests run against.
+# Dependabot proposes updates; the CI runs the whole test suite on each one.
+playwright==1.61.0
+playwright-stealth==2.0.3
+openai==3.46.0

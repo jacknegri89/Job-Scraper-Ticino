@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="__CSP__">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>JobScraper - Lombardy and Ticino jobs</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2212%22 fill=%22%230B3D91%22/><path d=%22M14 32h34M37 20l12 12-12 12%22 fill=%22none%22 stroke=%22%23fff%22 stroke-width=%226%22 stroke-linejoin=%22round%22/></svg>">
+<style>
+__STYLE__</style>
+</head>
+<body>
+
+<header class="sign">
+  <div class="sign-in">
+    <div class="sign-top">
+      <h1>JobScraper<span class="to">&rarr; __REGIONS__</span></h1>
+      <span class="updated">Updated __NOW__</span>
+    </div>
+    <p class="subtitle">__SUBTITLE__</p>
+    <div class="tally">
+      <div class="tally-item"><b>__COUNT__</b><span>cached jobs</span></div>
+      __MATCH_TALLY__
+      <div class="tally-item"><b>__NSOURCES__</b><span>sources</span></div>
+    </div>
+  </div>
+</header>
+
+<div class="page">
+  <aside class="rail" aria-label="Filters">
+    <div>
+      <label class="field-label" for="search">Search</label>
+      <input id="search" type="search" placeholder="Title, company or city" autocomplete="off">
+    </div>
+    <div>
+      <label class="field-label" for="sort">Sort by</label>
+      <select id="sort">
+        <option value="date">Newest published</option>
+        <option value="checked">Most recently checked</option>
+        __NEAREST_OPTION__
+        <option value="net">Highest net salary</option>
+      </select>
+    </div>
+    <p class="found" aria-live="polite"><b id="visible-n">__COUNT__</b> results</p>
+    <div>
+      <span class="field-label" id="field-label">Field</span>
+      <div class="chips" role="group" aria-labelledby="field-label" data-filter="category">
+        <button class="chip" data-value="all" aria-pressed="true">All <span class="n">__COUNT__</span></button>
+        __CAT_CHIPS__
+        __CHIP_AI__
+      </div>
+    </div>
+    __FILTER_GROUPS__
+    <div>
+      <label class="field-label" for="place">Place</label>
+      <select id="place"><option value="">All places</option>__PLACE_OPTIONS__</select>
+    </div>
+    <div>
+      <label class="field-label" for="source">Source</label>
+      <select id="source"><option value="">All sources</option>__SOURCE_OPTIONS__</select>
+    </div>
+    <label class="check"><input type="checkbox" id="precise"> Precise location only</label>
+  </aside>
+
+  <main>
+    <div class="list" id="grid">
+__CARDS__
+    </div>
+    <div class="empty" id="empty">
+      <h3>No jobs match</h3>
+      <p>__EMPTY_SUB__</p>
+    </div>
+  </main>
+</div>
+
+<footer>
+  Sources: __SOURCELIST__<br>
+  Salary and distance figures are indicative estimates, not offers.__FX_NOTE__
+</footer>
+
+<script>
+__SCRIPT__</script>
+
+</body>
+</html>

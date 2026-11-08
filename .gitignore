@@ -239,6 +239,10 @@ user_settings.json
 user_settings.json.v1.bak
 .settings-*.tmp
 scraper.log
+scraper.log.old
 
 # Local planning artifacts for agents; not needed to run the scraper
 .planning/
+
+# Lock held while a scan is running
+.jobscraper.lock

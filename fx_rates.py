@@ -81,7 +81,7 @@ def get_fx_rate(mode: str = FX_MODE_ECB, manual_eur_per_chf: float | None = None
 def _download_ecb_rate() -> FxRate | None:
     request = urllib.request.Request(ECB_DAILY_URL, headers={"User-Agent": "JobScraper"})
     try:
-        with urllib.request.urlopen(request, timeout=FX_REQUEST_TIMEOUT_SECONDS) as response:
+        with urllib.request.urlopen(request, timeout=FX_REQUEST_TIMEOUT_SECONDS) as response:  # noqa: S310 - the URL is a fixed https constant
             body = response.read(FX_MAX_RESPONSE_BYTES)
     except OSError:
         return None

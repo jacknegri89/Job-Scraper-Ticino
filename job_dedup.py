@@ -19,8 +19,11 @@ from job_status import STATUS_PRECEDENCE
 TITLE_SIMILARITY_THRESHOLD = 0.92
 _ANONYMOUS_COMPANIES = ("confidenziale", "confidential", "riservat", "anonim", "vertraulich")
 _ONLY_WORD_CHARACTERS = re.compile(r"\W+")
+_WORDS = re.compile(r"\w+")
+_LEGAL_FORMS = frozenset({"sa", "srl", "spa", "sagl", "ag", "gmbh", "snc", "sas", "ltd", "llc", "inc", "sarl"})
 # Fields copied from a duplicate when the main listing does not have them.
 _FILL_FIELDS = ("description", "email", "salary_text", "company")
+_LEGACY_ANALYSIS_FIELDS = ("estimated_gross_salary_chf",)
 
 
 def deduplicate(jobs: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -82,9 +85,32 @@ def _is_cross_portal_duplicate(candidate: dict, job: dict) -> bool:
 
 
 def _bucket_key(job: dict) -> tuple[str, str]:
-    company = _compact(str(job.get("company") or ""))[:25]
+    """Company and place. The whole company name counts: a long common prefix is not enough."""
     place = _compact(str(job.get("place_name") or job.get("city") or ""))
-    return company, place
+    return _company_key(str(job.get("company") or "")), place
+
+
+def _company_key(company: str) -> str:
+    """Company name without punctuation, case and a trailing legal form ('SA', 'S.r.l.')."""
+    words = _WORDS.findall(company.casefold())
+    while len(words) > 1 and _is_legal_form_at_end(words):
+        words = words[: -_legal_form_length(words)]
+    return "".join(words)
+
+
+def _is_legal_form_at_end(words: list[str]) -> bool:
+    return _legal_form_length(words) > 0
+
+
+def _legal_form_length(words: list[str]) -> int:
+    """How many trailing words are a legal form: 'srl' is 1 word, 's r l' (from 'S.r.l.') is 3."""
+    if words[-1] in _LEGAL_FORMS:
+        return 1
+    for letters in (3, 2):
+        tail = words[-letters:]
+        if len(words) > letters and all(len(word) == 1 for word in tail) and "".join(tail) in _LEGAL_FORMS:
+            return letters
+    return 0
 
 
 def _register(job: dict, unique_jobs: list[dict], seen_by_url: dict, buckets: dict) -> None:
@@ -107,7 +133,17 @@ def _merge_into(main_job: dict, duplicate: dict) -> None:
     for field_name in _FILL_FIELDS:
         if not main_job.get(field_name) and duplicate.get(field_name):
             main_job[field_name] = duplicate[field_name]
+    _merge_analysis(main_job, duplicate)
     _merge_freshness(main_job, duplicate)
+
+
+def _merge_analysis(main_job: dict, duplicate: dict) -> None:
+    """Keep an AI analysis that only the other copy of the job has; it is never recomputed for nothing."""
+    if main_job.get("ai_suitable") is not None or duplicate.get("ai_suitable") is None:
+        return
+    for field_name, value in duplicate.items():
+        if field_name.startswith("ai_") or field_name in _LEGACY_ANALYSIS_FIELDS:
+            main_job[field_name] = value
 
 
 def _merge_freshness(main_job: dict, duplicate: dict) -> None:

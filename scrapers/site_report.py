@@ -63,8 +63,14 @@ class RunReport:
 
     def set_status(self, site: str, status: str, reason: str = "",
                    final_url: str = "", screenshot: str = "") -> None:
-        # Called by scrapers when they detect a gate (login, captcha)
-        # without interrupting collection of jobs already found.
+        # Called by scrapers when they detect a gate (login, captcha) or a problem on
+        # one page, without interrupting collection of jobs already found. A weaker
+        # status never replaces a stronger one: a later "no_results" must not hide an
+        # earlier failed page, and a later "ok_partial" must not hide a block.
+        current = self._overrides.get(site)
+        if current is not None and _issue_rank(current["status"]) > _issue_rank(status):
+            print(f"  [report] {site}: {status} ignored, {current['status']} was already reported")
+            return
         self._overrides[site] = {
             "status": status, "reason": reason,
             "final_url": final_url, "screenshot": screenshot,
@@ -156,10 +162,19 @@ def _status_with_override(
     if not override:
         return status, reason
 
+    reported_status = status
     status = override["status"]
     reason = override["reason"] or reason
-    if jobs > 0 and status in ("requires_auth", "requires_manual_login", "blocked"):
+    if jobs > 0 and status in _GATE_STATUSES:
         return "ok_partial", _partial_reason(status, override["reason"])
+    if jobs > 0 and status in ("no_results", "selector_broken", "empty"):
+        # Listings were read, so the source is not empty; part of it was not understood.
+        return "ok_partial", _partial_reason(status, override["reason"])
+    if jobs == 0 and status == "ok_partial":
+        # "Partial" needs something read. A page that failed with nothing collected is a failure,
+        # and the more precise cause (timeout, network error...) is kept when the scraper gave one.
+        failure_status = reported_status if reported_status in _FAILURE_STATUSES else "error"
+        return failure_status, _partial_reason("no listing could be read", reason)
     return status, reason
 
 
@@ -167,6 +182,21 @@ def _partial_reason(status: str, reason: str) -> str:
     if reason:
         return f"{status}: {reason}"
     return status
+
+
+_GATE_STATUSES = ("requires_auth", "requires_manual_login", "blocked")
+_FAILURE_STATUSES = ("timeout", "network_error", "browser_closed", "selector_broken", "error", *_GATE_STATUSES)
+
+
+def _issue_rank(status: str) -> int:
+    """How serious a reported problem is: gates first, then partial reads, then the rest."""
+    if status in _GATE_STATUSES:
+        return 3
+    if status == "ok_partial":
+        return 2
+    if status in ("no_results", "empty"):
+        return 0
+    return 1
 
 
 def _site_result(

@@ -3,6 +3,7 @@ import urllib.parse
 from playwright.sync_api import BrowserContext, Page
 
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, retry
+from scrapers.pagination import report_gate_if_any
 from scrapers.site_report import run_report
 from job_filter import SEARCH_TERMS, categorize_job
 
@@ -65,9 +66,11 @@ def scrape_jobs_ch(
         # A fresh page per term: if one page crashes, the other terms are not lost.
         page = new_stealth_page(context)
         try:
-            _scrape_term(page, term, seen_urls, all_jobs)
+            gate_found = _scrape_term(page, term, seen_urls, all_jobs)
         finally:
             _close_page_quietly(page)
+        if gate_found:
+            break
     print(f"[jobs.ch] Raw total: {len(all_jobs)}")
     return all_jobs
 
@@ -84,16 +87,20 @@ def _scrape_term(
     term: str,
     seen_urls: set[str],
     all_jobs: list[dict[str, str]],
-) -> None:
+) -> bool:
+    """Search one term. Returns True when a block or login wall stopped the portal."""
     print(f"[jobs.ch] Searching: '{term}'")
     term_urls: set[str] = set()
     for page_num in range(1, MAX_PAGES + 1):
         page_urls = _add_page_jobs(page, term, page_num, seen_urls, all_jobs)
-        # Stop on a failed or empty page, and when the portal repeats results already
-        # seen for this term. Jobs found by other terms do not stop the search.
-        if not page_urls or term_urls.issuperset(page_urls):
+        if not page_urls:
+            return report_gate_if_any(page, "jobs.ch")
+        # Stop when the portal repeats results already seen for this term. Jobs found
+        # by other terms do not stop the search.
+        if term_urls.issuperset(page_urls):
             break
         term_urls.update(page_urls)
+    return False
 
 
 def _add_page_jobs(

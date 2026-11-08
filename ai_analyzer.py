@@ -142,8 +142,12 @@ def analysis_state(job: Job, key: str) -> str:
     return "to_analyze"
 
 
-def analyze_jobs(jobs: list[Job], retry_unanalyzable: bool = False) -> list[Job]:
-    """Analyze the jobs whose analysis is missing or out of date."""
+def analyze_jobs(jobs: list[Job], retry_unanalyzable: bool = False, max_jobs: int | None = None) -> list[Job]:
+    """Analyze the jobs whose analysis is missing or out of date.
+
+    At most `max_jobs` are sent in one run, the most recently published first; the others
+    stay pending and are picked up by the next run. None means no limit.
+    """
     jobs = [normalize_ai_fields(job) for job in jobs]
     profile_text = _load_candidate_profile()
     keys = _prepare_keys(jobs, profile_fingerprint(profile_text))
@@ -152,7 +156,7 @@ def analyze_jobs(jobs: list[Job], retry_unanalyzable: bool = False) -> list[Job]
     client = _create_openai_client()
     if client is None:
         return jobs
-    pending_indexes = _pending_indexes(jobs, keys, retry_unanalyzable)
+    pending_indexes = _limit_pending(jobs, _pending_indexes(jobs, keys, retry_unanalyzable), max_jobs)
     _print_analysis_start(jobs, keys, pending_indexes)
     _analyze_pending(client, jobs, keys, pending_indexes, profile_text)
     _print_summary(jobs)
@@ -181,6 +185,15 @@ def _pending_indexes(jobs: list[Job], keys: list[str], retry_unanalyzable: bool)
         if state == "to_analyze" or (state == STATUS_UNANALYZABLE and retry_unanalyzable):
             pending.append(index)
     return pending
+
+
+def _limit_pending(jobs: list[Job], pending_indexes: list[int], max_jobs: int | None) -> list[int]:
+    """Keep the newest `max_jobs` pending listings and say how many were left for later."""
+    if max_jobs is None or len(pending_indexes) <= max_jobs:
+        return pending_indexes
+    newest_first = sorted(pending_indexes, key=lambda index: str(jobs[index].get("published") or ""), reverse=True)
+    print(f"[LLM] Limit of {max_jobs} listings per run: {len(pending_indexes) - max_jobs} wait for the next run.")
+    return newest_first[:max_jobs]
 
 
 def _can_analyze_with_ai() -> bool:
@@ -381,11 +394,6 @@ def _is_rate_limit(error: Exception) -> bool:
 def _is_fatal(error: Exception) -> bool:
     """Bad credentials or permissions: no job can succeed with these settings."""
     return getattr(error, "status_code", None) in (401, 403)
-
-
-def _is_bad_request(error: Exception) -> bool:
-    """The API refused this particular listing (for example a content filter)."""
-    return getattr(error, "status_code", None) == 400
 
 
 def _decode_model_json(content: str) -> JsonObject:

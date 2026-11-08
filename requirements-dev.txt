@@ -1,0 +1,4 @@
+# Everything needed to work on JobScraper: the runtime dependencies plus tests and lint.
+-r requirements.txt
+pytest==9.2.0
+ruff==0.17.4

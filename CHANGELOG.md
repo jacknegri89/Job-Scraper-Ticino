@@ -16,12 +16,36 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - Settings version 2 with an automatic migration and a one-time `.v1.bak` backup; atomic cache writes with backups.
 - The panel can look a town up for the starting point and choose every new option.
 
+- Exit codes a scheduler can trust: `0` success, `1` failure, `2` partial, `3` another search is running. The panel shows the same outcome.
+- One search at a time per folder (a lock file, with recovery of locks left by a crash), also across the panel, the command line and scheduled tasks.
+- `--ai` to ask for the AI rating on the command line, and a setting for the most listings rated per search (25 by default).
+- Remote and hybrid work read from clear statements in the description, never from denials or vague mentions.
+- `scrapers/pagination.py`: a shared page loop that keeps the listings already read when a later page fails and reports blocks and login walls.
+- `run_scheduled.bat` for Windows Task Scheduler, using the project's `.venv`, writing `scraper.log` and passing the exit code on.
+- `requirements-dev.txt`, pinned dependencies, Dependabot, a Windows test job, a dependency audit job and the security rules of bandit in the lint step.
+
 ### Changed
 - The project is now called JobScraper (it was Job Scraper Ticino). The old GitHub address redirects to the new one.
 - The cross-border estimate treated 0.96 as EUR per CHF, about 12% below the ECB rate, and used the 2025 second IRPEF bracket and a wrong deduction formula for the 28,000-50,000 EUR band. All three are fixed.
 - Italian portals are no longer rejected by the filter. Listings are placed by their location, not by a fixed list of eight municipalities (settings from earlier versions keep exactly that behaviour).
 - Fields: electronics and machining are now a separate field from software, IT and AI; "Programmatore CNC" is no longer a software job.
 - A listing page is opened for at most 60 new jobs per run.
+
+- The AI is off until you switch it on (panel or `--ai`). Before, having `OPENAI_API_KEY` set could start paid requests when no settings were saved, and every cached listing was sent, including those your filters hide or that had expired.
+- A source with `ok_partial` and nothing read is now a failure; a later "no results" or "partial" note can no longer hide an earlier block or failed page; listings next to a failed search are partial, not `ok`.
+- A search that finished with no results now lets saved listings of that source expire; blocks, errors and partial reads still never do.
+- Seniority, contract type and work mode are read again once the description is known, and unknown values are only filtered then, so an excluded "senior" listing no longer slips through and a listing is no longer dropped before its description could settle it.
+- A scan where no source could be read leaves the cache and the dashboard untouched.
+- The dashboard is written in one step, so a crash cannot leave a half-written page.
+- The dashboard script is allowed by its hash instead of `unsafe-inline`; the panel script needs a one-time nonce.
+- De-duplication compares whole company names (it truncated them to 25 characters, so two long names with the same start were merged) and keeps an AI rating that only the other copy had.
+- Windows scheduling uses the project's virtual environment instead of whichever `python` is on the PATH.
+- The panel and the command line refuse to start a second search while one is running.
+- The backup of the previous run's cache is no longer replaced by the first save of the current run.
+- The description download refused hosts outside the allowed list, but a redirect to another host was followed by the browser. Redirects are now checked before they are requested.
+- The job index download is size-limited; the browser session file is readable by its owner only on Linux and macOS.
+- `playwright-stealth` needs version 2 or later (the code uses its `Stealth` class); `requirements.txt` said 1.0.
+- Removed four unused functions.
 
 ### Fixed
 - AI results were reused after the candidate profile changed.
