@@ -297,22 +297,62 @@ def test_description_accepts_known_https_portal() -> None:
     ("https://127.0.0.1/private", "aborted"),
     ("https://other.example/redirect", "aborted"),
 ])
-def test_description_blocks_untrusted_redirects_and_resources(url: str, expected: str) -> None:
-    class Request:
-        pass
-
-    class Route:
-        def __init__(self) -> None:
-            self.request = Request()
-            self.request.url = url
-            self.result = ""
-
-        def continue_(self) -> None:
-            self.result = "continued"
-
-        def abort(self) -> None:
-            self.result = "aborted"
-
-    route = Route()
+def test_description_blocks_untrusted_hosts_and_resources(url: str, expected: str) -> None:
+    route = FakeRoute(url)
     _filter_description_request(route)
     assert route.result == expected
+
+
+class FakeResponse:
+    def __init__(self, status: int = 200, location: str = "") -> None:
+        self.status = status
+        self.headers = {"location": location} if location else {}
+
+
+class FakeRoute:
+    """A route whose upstream answer is scripted; records what the handler decided."""
+
+    def __init__(self, url: str, response: FakeResponse | None = None) -> None:
+        self.request = type("Request", (), {"url": url})()
+        self.response = response or FakeResponse()
+        self.fetch_options: dict = {}
+        self.result = ""
+
+    def fetch(self, **options) -> FakeResponse:
+        self.fetch_options = options
+        return self.response
+
+    def fulfill(self, response: FakeResponse) -> None:
+        self.result = "continued"
+
+    def abort(self) -> None:
+        self.result = "aborted"
+
+
+@pytest.mark.parametrize(("status", "location", "expected"), [
+    (302, "https://evil.example/steal", "aborted"),
+    (301, "http://www.jobs.ch/downgraded", "aborted"),
+    (307, "https://127.0.0.1/admin", "aborted"),
+    (302, "https://169.254.169.254/latest/meta-data", "aborted"),
+    (302, "//evil.example/x", "aborted"),
+    (302, "https://www.jobs.ch.evil.example/x", "aborted"),
+    (302, "https://www.jobs.ch/en/vacancies/detail/2", "continued"),
+    (303, "/en/vacancies/detail/2", "continued"),
+    (200, "", "continued"),
+    (404, "", "continued"),
+])
+def test_a_redirect_is_followed_only_to_an_allowed_host(status: int, location: str, expected: str) -> None:
+    route = FakeRoute("https://www.jobs.ch/en/vacancies/detail/1", FakeResponse(status, location))
+    _filter_description_request(route)
+    assert route.result == expected
+    assert route.fetch_options == {"max_redirects": 0}
+
+
+def test_a_failing_upstream_request_is_aborted_not_raised() -> None:
+    class Broken(FakeRoute):
+        def fetch(self, **_options):
+            raise OSError("connection reset")
+
+    route = Broken("https://www.jobs.ch/en/vacancies/detail/1")
+    _filter_description_request(route)
+    assert route.result == "aborted"

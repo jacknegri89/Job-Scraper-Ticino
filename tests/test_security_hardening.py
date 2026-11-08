@@ -180,24 +180,6 @@ def test_an_allowed_portal_is_accepted_whatever_the_letter_case() -> None:
     assert _valid_description_url("https://WWW.JOBS.CH/en/vacancies/detail/1") is True
 
 
-def test_description_pages_run_no_scripts_and_block_other_hosts() -> None:
-    class Route:
-        def __init__(self, url: str) -> None:
-            self.request = type("Request", (), {"url": url})()
-            self.action = ""
-
-        def continue_(self) -> None:
-            self.action = "continue"
-
-        def abort(self) -> None:
-            self.action = "abort"
-
-    allowed, redirected_elsewhere = Route("https://www.jobs.ch/x"), Route("https://tracker.example/pixel")
-    scrapers._filter_description_request(allowed)
-    scrapers._filter_description_request(redirected_elsewhere)
-    assert (allowed.action, redirected_elsewhere.action) == ("continue", "abort")
-
-
 class _FakeResponse(io.BytesIO):
     def __enter__(self):
         return self

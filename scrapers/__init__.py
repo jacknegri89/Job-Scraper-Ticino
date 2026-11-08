@@ -6,7 +6,7 @@ import functools
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn, ParamSpec, TypeVar
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from playwright.sync_api import Browser, BrowserContext, ElementHandle, Page, Playwright
 
@@ -343,11 +343,32 @@ def _valid_description_url(url: str) -> bool:
         return False
 
 
+_REDIRECT_STATUS_CODES = (301, 302, 303, 307, 308)
+
+
 def _filter_description_request(route: Any) -> None:
-    if _valid_description_url(route.request.url):
-        route.continue_()
-    else:
+    """Let a request through only if it, and any redirect it answers with, stays on an allowed host.
+
+    The browser follows redirects by itself and never shows them to a route handler, so a
+    portal (or an attacker behind an open redirect) could send it to any address. The request
+    is therefore made here without following redirects: the answer is passed on only when
+    its redirect target is allowed too, and the browser's next request comes back to this check.
+    """
+    url = route.request.url
+    if not _valid_description_url(url):
         route.abort()
+        return
+    try:
+        response = route.fetch(max_redirects=0)
+    except Exception:
+        route.abort()
+        return
+    if response.status in _REDIRECT_STATUS_CODES:
+        target = urljoin(url, response.headers.get("location", ""))
+        if not _valid_description_url(target):
+            route.abort()
+            return
+    route.fulfill(response=response)
 
 
 def _open_description_page(context: BrowserContext, url: str) -> Page:
