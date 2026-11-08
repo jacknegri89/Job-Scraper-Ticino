@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Configura Job Scraper Ticino</title>
+  <title>Configure Job Scraper Ticino</title>
   <style>
     /* Same palette as the dashboard: cold stone paper, ink, Ticino blue sign, one red action. */
     :root {
@@ -75,50 +75,50 @@
 <header class="sign">
   <div class="sign-in">
     <h1>Job Scraper Ticino</h1>
-    <p class="intro">Scegli dove e come cercare. La ricerca parte in background e prepara la dashboard.</p>
+    <p class="intro">Choose where and how to search. The search runs in the background and builds your dashboard.</p>
   </div>
 </header>
 <main>
   <form id="settings-form">
     <section>
-      <fieldset><legend>Comuni da includere</legend><p class="hint">Seleziona almeno un comune.</p><div class="choices" id="cities"></div></fieldset>
+      <fieldset><legend>Municipalities to include</legend><p class="hint">Select at least one municipality.</p><div class="choices" id="cities"></div></fieldset>
     </section>
     <section>
-      <fieldset><legend>Fonti di annunci</legend><p class="hint">Seleziona almeno una fonte.</p><div class="choices" id="sources"></div></fieldset>
+      <fieldset><legend>Job sources</legend><p class="hint">Select at least one source.</p><div class="choices" id="sources"></div></fieldset>
     </section>
     <section>
-      <h2>Ricerca su jobs.ch</h2>
-      <label for="terms">Parole di ricerca</label>
+      <h2>jobs.ch search terms</h2>
+      <label for="terms">Search terms</label>
       <textarea id="terms" required maxlength="10000" aria-describedby="terms-hint"></textarea>
-      <p class="hint" id="terms-hint">Una parola o frase per riga. Gli altri portali usano le proprie strategie di ricerca.</p>
+      <p class="hint" id="terms-hint">One word or phrase per line. The other portals use their own search strategies.</p>
     </section>
     <section>
-      <h2>Distanza</h2>
-      <label class="choice"><input type="checkbox" id="use-distance"> Calcola la distanza in linea d'aria</label>
+      <h2>Distance</h2>
+      <label class="choice"><input type="checkbox" id="use-distance"> Show straight-line distance from home</label>
       <div id="distance-fields" class="row">
-        <div><label for="home-city">Località di partenza</label><input id="home-city" type="text" maxlength="100"></div>
-        <div><label for="latitude">Latitudine</label><input id="latitude" type="number" min="-90" max="90" step="any"></div>
-        <div><label for="longitude">Longitudine</label><input id="longitude" type="number" min="-180" max="180" step="any"></div>
+        <div><label for="home-city">Starting point</label><input id="home-city" type="text" maxlength="100"></div>
+        <div><label for="latitude">Latitude</label><input id="latitude" type="number" min="-90" max="90" step="any"></div>
+        <div><label for="longitude">Longitude</label><input id="longitude" type="number" min="-180" max="180" step="any"></div>
       </div>
-      <p class="hint">Inserisci le coordinate in gradi decimali, ad esempio 45.83 e 9.03. Non è un percorso stradale.</p>
+      <p class="hint">Enter coordinates in decimal degrees, for example 45.83 and 9.03. Distances are straight-line, not driving routes.</p>
     </section>
     <section>
-      <h2>Analisi AI facoltativa</h2>
-      <label class="choice"><input type="checkbox" id="ai-enabled"> Valuta gli annunci rispetto al mio profilo</label>
-      <div id="ai-fields"><label for="profile">Profilo professionale</label><textarea id="profile" maxlength="3000"></textarea>
-        <p class="hint">Il profilo e i dati degli annunci vengono inviati a OpenAI. È necessaria la variabile d'ambiente OPENAI_API_KEY: la chiave non viene inserita né salvata qui. I risultati AI già in cache non vengono ricalcolati automaticamente.</p></div>
+      <h2>Optional AI analysis</h2>
+      <label class="choice"><input type="checkbox" id="ai-enabled"> Rate each listing against my profile</label>
+      <div id="ai-fields"><label for="profile">Professional profile</label><textarea id="profile" maxlength="3000"></textarea>
+        <p class="hint">Your profile and the listing data are sent to OpenAI. The OPENAI_API_KEY environment variable is required: the key is never entered or stored here. AI results already in the cache are not recalculated automatically.</p></div>
     </section>
     <section>
-      <h2>Opzioni di esecuzione</h2>
-      <div class="row"><div><label for="timeout">Timeout predefinito (millisecondi)</label><input id="timeout" type="number" min="1000" max="120000" step="1" required></div>
-        <div><label for="attempts">Tentativi per fonte</label><input id="attempts" type="number" min="1" max="3" step="1" required></div></div>
-      <p class="hint">La ricerca in background usa il browser senza finestra. Alcune fonti hanno timeout propri.</p>
+      <h2>Run options</h2>
+      <div class="row"><div><label for="timeout">Default timeout (milliseconds)</label><input id="timeout" type="number" min="1000" max="120000" step="1" required></div>
+        <div><label for="attempts">Attempts per source</label><input id="attempts" type="number" min="1" max="3" step="1" required></div></div>
+      <p class="hint">Background searches use a hidden browser window. Some sources have their own timeouts.</p>
     </section>
     <section class="status">
-      <h2>Stato della ricerca</h2>
-      <p id="status" aria-live="polite">Pronta per iniziare.</p>
-      <p class="hint">Le impostazioni sono salvate solo su questo computer. Al termine si apre la dashboard nel browser.</p>
-      <div class="actions"><button type="submit" class="primary" id="start">Avvia ricerca</button><button type="button" id="save">Salva impostazioni</button><button type="button" id="close">Chiudi pannello</button></div>
+      <h2>Search status</h2>
+      <p id="status" aria-live="polite">Ready to start.</p>
+      <p class="hint">Settings are saved on this computer only. The dashboard opens in your browser when the search finishes.</p>
+      <div class="actions"><button type="submit" class="primary" id="start">Start search</button><button type="button" id="save">Save settings</button><button type="button" id="close">Close panel</button></div>
       <p id="message" role="status" aria-live="polite"></p>
     </section>
   </form>
@@ -164,7 +164,7 @@ function collectSettings() {
   const sources = selected("sources");
   const terms = byId("terms").value.split(/[\n,]+/).map(value => value.trim()).filter(Boolean);
   if (!cities.length || !sources.length || !terms.length) {
-    throw new Error("Seleziona almeno un comune, una fonte e un termine di ricerca.");
+    throw new Error("Select at least one municipality, one source and one search term.");
   }
   // Without distance, no home point is sent and the dashboard hides distances.
   let homeCity = "";
@@ -198,15 +198,15 @@ async function send(action) {
       body: JSON.stringify(settings)
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "Operazione non riuscita.");
-    message.textContent = "Impostazioni salvate.";
+    if (!response.ok) throw new Error(result.error || "The operation failed.");
+    message.textContent = "Settings saved.";
     if (action === "start") {
-      message.textContent = "Ricerca avviata in background.";
+      message.textContent = "Search started in the background.";
     }
     await refreshStatus();
   } catch (error) {
     message.className = "error";
-    message.textContent = error.message || "Operazione non riuscita.";
+    message.textContent = error.message || "The operation failed.";
   }
 }
 
@@ -214,11 +214,11 @@ async function refreshStatus() {
   try {
     const response = await fetch(`/${data.token}/status`, {cache: "no-store"});
     const result = await response.json();
-    const labels = {idle: "Pronta per iniziare.", running: "Ricerca in corso in background…", complete: "Ricerca completata. La dashboard è pronta.", error: "La ricerca non è riuscita. Controlla scraper.log nella cartella del progetto."};
-    statusText.textContent = labels[result.status] || "Stato non disponibile.";
+    const labels = {idle: "Ready to start.", running: "Search running in the background…", complete: "Search complete. Your dashboard is ready.", error: "The search failed. Check scraper.log in the project folder."};
+    statusText.textContent = labels[result.status] || "Status unavailable.";
     startButton.disabled = result.status === "running";
   } catch (_) {
-    statusText.textContent = "Pannello non raggiungibile.";
+    statusText.textContent = "Panel unreachable.";
   }
 }
 
@@ -241,10 +241,10 @@ byId("close").addEventListener("click", async () => {
   try {
     await fetch(`/${data.token}/close`, {method: "POST", headers: {"Content-Type": "application/json", "X-CSRF-Token": data.token}, body: "{}"});
     clearInterval(statusTimer);
-    statusText.textContent = "Pannello chiuso. Un'eventuale ricerca continua in background.";
+    statusText.textContent = "Panel closed. A running search continues in the background.";
     form.querySelectorAll("button").forEach(button => { button.disabled = true; });
   } catch (_) {
-    message.textContent = "Impossibile chiudere il pannello.";
+    message.textContent = "Could not close the panel.";
   }
 });
 toggleFields();

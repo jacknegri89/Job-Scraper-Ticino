@@ -1,4 +1,4 @@
-"""Pannello locale per configurare e avviare lo scraper in background."""
+"""Local panel to configure the scraper and start it in the background."""
 
 import hmac
 import json
@@ -54,10 +54,10 @@ class LocalPanelServer(ThreadingHTTPServer):
     def start(self, settings):
         startup_config.validate_settings(settings, self.cities, self.sources)
         if settings["ai_enabled"] and not os.environ.get("OPENAI_API_KEY"):
-            raise ValueError("Per usare l'AI imposta OPENAI_API_KEY e riapri il pannello.")
+            raise ValueError("To use the AI analysis, set OPENAI_API_KEY and reopen the panel.")
         with self.lock:
             if self.process is not None and self.process.poll() is None:
-                raise ValueError("Una ricerca è già in corso.")
+                raise ValueError("A search is already running.")
             startup_config.save_settings(startup_config.SETTINGS_FILE, settings)
             self.settings = settings
             command = [sys.executable, str(PROJECT_DIR / "main.py"), "--background", "--headless", "--project-dir"]
@@ -148,7 +148,7 @@ class PanelHandler(BaseHTTPRequestHandler):
         if not self._has_valid_token():
             return self.send_error(403)
         if not self.server.allow_request():
-            return self._send_json(429, {"error": "Troppe richieste. Riprova tra poco."})
+            return self._send_json(429, {"error": "Too many requests. Try again shortly."})
         if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
             return self.send_error(415)
         if self.path == f"/{self.server.token}/close":
@@ -167,7 +167,7 @@ class PanelHandler(BaseHTTPRequestHandler):
                 return self.send_error(400)
             settings = json.loads(body.decode("utf-8"))
             if not isinstance(settings, dict):
-                raise ValueError("Configurazione non valida.")
+                raise ValueError("Invalid configuration.")
             settings["headless"] = True
             if self.path.endswith("/start"):
                 self.server.start(settings)
@@ -177,14 +177,14 @@ class PanelHandler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeError, json.JSONDecodeError) as error:
             return self._send_json(400, {"error": str(error)})
         except OSError:
-            return self._send_json(500, {"error": "Operazione non riuscita. Controlla i permessi della cartella."})
+            return self._send_json(500, {"error": "The operation failed. Check the folder permissions."})
 
 
 def open_panel(settings, cities, sources):
     server = LocalPanelServer(settings, cities, sources)
     url = f"http://{server.host}/{server.token}"
     if sys.stdout is not None:
-        print("Pannello pronto nel browser. Usa 'Chiudi pannello' per terminarlo.")
+        print("Panel ready in your browser. Use 'Close panel' to stop it.")
     webbrowser.open(url)
     try:
         server.serve_forever()

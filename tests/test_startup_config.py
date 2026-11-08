@@ -1,4 +1,4 @@
-"""Test della configurazione iniziale e delle scelte applicate alla ricerca."""
+"""Tests for saved settings and how they are applied to a search."""
 
 import argparse
 import json

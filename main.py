@@ -629,7 +629,7 @@ def _finalize_jobs(valid_jobs: list[dict], started_at: datetime) -> None:
     if _AI_ENABLED:
         analyzed_jobs = analyze_jobs(valid_jobs)
     else:
-        print("[AI] Analisi disattivata nella configurazione.")
+        print("[AI] Analysis is switched off in the settings.")
         analyzed_jobs = valid_jobs
     if analyzed_jobs:
         _save_cache(analyzed_jobs)
@@ -700,7 +700,7 @@ def _setup_search(args: argparse.Namespace) -> bool:
     if settings is not None:
         _apply_search_settings(settings, args)
     elif not args.dry_run:
-        print("[CONFIG] Nessuna configurazione salvata: uso le impostazioni precedenti.")
+        print("[CONFIG] No saved settings: using user_config.py or the built-in defaults.")
     return True
 
 
@@ -717,7 +717,7 @@ def main() -> None:
         if not _setup_search(args):
             return
     except (ValueError, OSError, json.JSONDecodeError) as error:
-        print(f"[CONFIG] Errore: {error}")
+        print(f"[CONFIG] Error: {error}")
         sys.exit(1)
     valid_jobs = _run_scan_mode(args, started_at)
     if valid_jobs is None:

@@ -1,4 +1,4 @@
-"""Controlli del pannello locale: accesso, validazione e salvataggio."""
+"""Local panel checks: access control, validation and saving."""
 
 import http.client
 import json
