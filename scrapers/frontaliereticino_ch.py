@@ -17,7 +17,8 @@ from job_filter import categorize_job
 _INDEX_URL = "https://cdn.frontaliereticino.ch/data/jobs-it-index.json"
 _JOB_BASE  = "https://frontaliereticino.ch/cerca-lavoro-ticino/"
 _HEADERS   = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-_MAX_INDEX_BYTES = 20 * 1024 * 1024
+# The real index was 39 MB (33,707 records) on 2026-11-08; the limit only guards against a runaway answer.
+_MAX_INDEX_BYTES = 150 * 1024 * 1024
 
 
 def _parse_date(raw: str) -> str:

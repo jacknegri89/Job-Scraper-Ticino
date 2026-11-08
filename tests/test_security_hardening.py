@@ -280,3 +280,9 @@ def test_personal_files_are_not_tracked_by_git() -> None:
     for personal_file in ("user_settings.json", "user_config.py", "jobs_cache.json", "profile/", "scan_report.json",
                           "debug/", "scraper.log", ".jobscraper.lock"):
         assert personal_file in ignore_rules
+
+
+def test_the_index_size_limit_is_above_the_real_size_of_the_index() -> None:
+    # The real index was 40,655,811 bytes on 2026-11-08. A first limit of 20 MB made the source
+    # fail in a real scan; the limit must leave room to grow and only stop a runaway answer.
+    assert frontaliereticino_ch._MAX_INDEX_BYTES >= 100 * 1024 * 1024
