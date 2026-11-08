@@ -53,6 +53,8 @@ LOCK_FILE = Path(run_lock.LOCK_FILE_NAME)
 
 # A listing page takes about 7 seconds to open; the rest are read on the next run.
 MAX_DESCRIPTIONS_PER_RUN = 60
+# Set on listings whose description waits for the next run; the AI does not rate them yet.
+DESCRIPTION_DEFERRED = "description_deferred"
 
 # Set by _apply_search_settings when a saved panel configuration is used.
 # The AI is paid and sends data to OpenAI, so it only runs when the user switched it on
@@ -241,12 +243,17 @@ def _print_scan_summary(result: PipelineResult) -> None:
 
 
 def _download_descriptions(context: Any, valid_jobs: list[dict]) -> None:
+    for job in valid_jobs:
+        job.pop(DESCRIPTION_DEFERRED, None)
     jobs_to_download = [job for job in valid_jobs if _needs_description(job)]
     if not jobs_to_download:
         return
     left_for_next_run = len(jobs_to_download) - MAX_DESCRIPTIONS_PER_RUN
     if left_for_next_run > 0:
         print(f"[DESC] Opening the {MAX_DESCRIPTIONS_PER_RUN} newest pages now; {left_for_next_run} more on the next run.")
+        # Their rating would change once the description arrives, so it waits for that run.
+        for job in jobs_to_download[MAX_DESCRIPTIONS_PER_RUN:]:
+            job[DESCRIPTION_DEFERRED] = True
     _download_description_batch(context, jobs_to_download[:MAX_DESCRIPTIONS_PER_RUN], len(valid_jobs))
 
 
@@ -509,8 +516,13 @@ def _finalize_jobs(valid_jobs: list[dict], started_at: datetime, retry_unanalyza
 
 
 def _jobs_worth_analyzing(jobs: list[dict]) -> list[dict]:
-    """Do not pay to rate a listing that is probably or certainly gone."""
-    return [job for job in jobs if job.get("status") not in (STATUS_POSSIBLY_EXPIRED, STATUS_GONE)]
+    """Do not pay to rate a listing that is probably gone, or one still waiting for its description.
+
+    The rating depends on the description, so rating before it arrives would be paid twice.
+    """
+    return [job for job in jobs
+            if job.get("status") not in (STATUS_POSSIBLY_EXPIRED, STATUS_GONE)
+            and not job.get(DESCRIPTION_DEFERRED)]
 
 
 def _visible_jobs(jobs: list[dict]) -> list[dict]:

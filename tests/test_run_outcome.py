@@ -312,3 +312,21 @@ def test_a_large_log_is_rotated_and_a_small_one_is_left_alone(tmp_path) -> None:
     assert (tmp_path / "scraper.log.old").read_text(encoding="utf-8") == "x" * 500
 
     setup_panel.rotate_log_if_large(tmp_path / "missing.log", max_bytes=100)  # no log yet: nothing to do
+
+
+def test_listings_whose_description_waits_for_the_next_run_are_not_rated_yet(monkeypatch) -> None:
+    monkeypatch.setattr(main, "MAX_DESCRIPTIONS_PER_RUN", 2)
+    monkeypatch.setattr(main, "_download_description_batch", lambda *_args: None)
+    jobs = [normalize_job(_raw(f"https://example.ch/{number}", f"Job {number}")) for number in range(1, 5)]
+    jobs[0][main.DESCRIPTION_DEFERRED] = True  # left over from an earlier run: cleared first
+
+    main._download_descriptions(None, jobs)
+
+    waiting = [job["title"] for job in jobs if job.get(main.DESCRIPTION_DEFERRED)]
+    assert waiting == ["Job 3", "Job 4"]
+    assert [job["title"] for job in main._jobs_worth_analyzing(jobs)] == ["Job 1", "Job 2"]
+
+
+def test_a_job_that_already_has_its_description_is_rated(monkeypatch) -> None:
+    job = normalize_job(_raw(description="A long description of the work and the team."))
+    assert main._jobs_worth_analyzing([job]) == [job]
