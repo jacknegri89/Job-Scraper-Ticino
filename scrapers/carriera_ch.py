@@ -1,6 +1,7 @@
 from playwright.sync_api import BrowserContext, Page
 
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, retry
+from scrapers.pagination import collect_pages
 from scrapers.site_report import run_report
 from job_filter import categorize_job
 
@@ -59,9 +60,10 @@ def scrape_carriera_ch(context: BrowserContext) -> list[dict[str, str]]:
     seen_urls: set[str] = set()
     page = new_stealth_page(context)
     try:
-        for page_num in range(MAX_PAGES):
-            if not _add_page_jobs(page, page_num, seen_urls, all_jobs):
-                break
+        def add_page(page_num: int) -> bool:
+            return _add_page_jobs(page, page_num, seen_urls, all_jobs)
+
+        collect_pages(page, "carriera.ch", range(MAX_PAGES), add_page, all_jobs)
         print(f"[carriera.ch] Raw total: {len(all_jobs)}")
         return all_jobs
     finally:

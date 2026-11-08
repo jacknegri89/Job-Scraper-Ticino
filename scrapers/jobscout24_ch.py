@@ -12,6 +12,7 @@ from datetime import date, timedelta
 from playwright.sync_api import BrowserContext, Page
 
 from scrapers import new_stealth_page, human_delay, human_scroll, dismiss_cookie_dialog, retry
+from scrapers.pagination import collect_pages
 from job_filter import categorize_job
 
 BASE_URL  = "https://www.jobscout24.ch"
@@ -86,9 +87,10 @@ def scrape_jobscout24_ch(context: BrowserContext) -> list[dict[str, str]]:
     seen_urls: set[str] = set()
     page = new_stealth_page(context)
     try:
-        for page_num in range(1, MAX_PAGES + 1):
-            if not _add_page_jobs(page, page_num, seen_urls, all_jobs):
-                break
+        def add_page(page_num: int) -> bool:
+            return _add_page_jobs(page, page_num, seen_urls, all_jobs)
+
+        collect_pages(page, "jobscout24.ch", range(1, MAX_PAGES + 1), add_page, all_jobs)
         print(f"  [jobscout24.ch] {len(all_jobs)} jobs found")
         return all_jobs
     finally:

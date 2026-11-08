@@ -6,3 +6,4 @@ if exist ".venv\Scripts\pythonw.exe" (
 )
 echo Local environment not found. Follow the Installation section of the README.
 pause
+exit /b 1
