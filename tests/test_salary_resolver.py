@@ -124,3 +124,16 @@ def test_thirteenth_and_fourteenth_month_are_used_when_stated() -> None:
     fourteen = resolve_salary(_job(description="2.000 euro al mese lordi per 14 mensilita"), RATE)
     assert fourteen["net"]["annual_min_eur"] > thirteen["net"]["annual_min_eur"]
     assert fourteen["net"]["payments"] == 14
+
+
+def test_upper_limit_is_labelled_and_explained() -> None:
+    result = resolve_salary(_job(salary_text="Fino a 48.000 € all'anno"), RATE)
+    assert result["bound"] == "max"
+    assert any("upper limit" in note for note in result["assumptions"])
+
+
+def test_internship_allowance_gets_no_tax_calculation() -> None:
+    result = resolve_salary(_job(salary_text="800 € al mese", contract_type="internship"), RATE)
+    assert result["origin"] == "stated"
+    assert result["net"] is None
+    assert any("Internship allowance" in note for note in result["assumptions"])

@@ -30,7 +30,7 @@ MAX_PLACE_LENGTH = 60
 _LEGACY_KEYS = {"cities", "sources", "search_terms", "home_city", "home_lat", "home_lng",
                 "ai_enabled", "candidate_profile", "headless", "timeout_ms", "attempts"}
 _CURRENT_KEYS = _LEGACY_KEYS - {"cities"} | {
-    "schema_version", "regions", "radius_km", "include_places", "include_uncertain_location",
+    "schema_version", "regions", "radius_km", "include_places", "include_uncertain_location", "include_remote",
     "categories", "seniority_levels", "contract_types", "expiry_days", "retention_days",
     "verify_limit", "fx_mode", "fx_manual_eur_per_chf",
 }
@@ -43,6 +43,7 @@ def default_settings(sources, search_terms):
         "radius_km": DEFAULT_RADIUS_KM,
         "include_places": [],
         "include_uncertain_location": False,
+        "include_remote": False,
         "categories": list(ALL_CATEGORIES),
         "seniority_levels": list(SENIORITY_LEVELS),
         "contract_types": list(CONTRACT_TYPES),
@@ -138,7 +139,7 @@ def _validate_text_fields(settings):
     for key in ("home_city", "candidate_profile"):
         if not isinstance(settings.get(key), str) or len(settings[key]) > MAX_TEXT_LENGTH:
             raise ValueError(f"The {key} field is not valid.")
-    for key in ("ai_enabled", "headless", "include_uncertain_location"):
+    for key in ("ai_enabled", "headless", "include_uncertain_location", "include_remote"):
         if not isinstance(settings.get(key), bool):
             raise ValueError(f"The {key} field must be true or false.")
 

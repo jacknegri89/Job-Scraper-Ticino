@@ -8,6 +8,7 @@ Normalized fields added to each job:
     published                                                    YYYY-MM-DD, or "" if unknown
     canonical_url, sources                                       original links on each portal
     category, seniority, seniority_evidence, contract_type       what kind of job it is
+    work_mode                                                    "remote", "hybrid" or "" (on site), as written
 """
 
 from copy import deepcopy
@@ -41,6 +42,7 @@ def normalize_job(raw_job: dict) -> dict:
     title = str(job.get("title") or "")
     description = str(job.get("description") or "")
     _set_location_fields(job)
+    job["work_mode"] = geo.work_mode_of(str(job.get("city") or ""))
     job["published"] = sort_date(job.get("date"))
     job["canonical_url"] = normalize_url(str(job.get("url") or ""))
     job["category"] = categorize_job(title)

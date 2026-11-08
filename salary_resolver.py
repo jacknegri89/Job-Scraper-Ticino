@@ -53,7 +53,7 @@ def resolve_salary(job: dict, fx_rate: FxRate | None = None) -> dict:
     found, origin = _find_salary(job, country)
     if found is None:
         return _unavailable(job, country)
-    return _with_net(found, origin, country, rate)
+    return _with_net(found, origin, country, rate, str(job.get("contract_type") or ""))
 
 
 def _find_salary(job: dict, country: str) -> tuple[dict | None, str]:
@@ -86,7 +86,7 @@ def _ai_salary(job: dict) -> dict | None:
 def _salary_record(currency: str, period: str, low: float, high: float, basis: str, text: str) -> dict:
     return {
         "ambiguous": False, "currency": currency, "period": period, "min": low, "max": high,
-        "basis": basis, "payments": None, "employment_percent": None, "text": text,
+        "bound": "exact", "basis": basis, "payments": None, "employment_percent": None, "text": text,
     }
 
 
@@ -111,14 +111,19 @@ def _find_ambiguous(job: dict, country: str) -> dict | None:
     return None
 
 
-def _with_net(found: dict, origin: str, country: str, rate: FxRate) -> dict:
+def _with_net(found: dict, origin: str, country: str, rate: FxRate, contract_type: str) -> dict:
     assumptions: list[str] = []
-    net = _net_estimate(found, country, rate, assumptions)
+    net = _net_for_contract(found, country, rate, contract_type, assumptions)
+    if net is not None and found.get("bound") == "max":
+        assumptions.append("Only an upper limit is written: the net estimate is calculated on that limit.")
+    if net is not None and found.get("bound") == "min":
+        assumptions.append("Only a lower limit is written: the net estimate is calculated on that limit.")
     return {
         "origin": origin,
         "label": ORIGIN_LABELS[origin],
         "currency": found["currency"],
         "period": found["period"],
+        "bound": found.get("bound", "exact"),
         "min": found["min"],
         "max": found["max"],
         "basis": found["basis"],
@@ -128,6 +133,15 @@ def _with_net(found: dict, origin: str, country: str, rate: FxRate) -> dict:
         "assumptions": assumptions,
         "note": "",
     }
+
+
+def _net_for_contract(found: dict, country: str, rate: FxRate, contract_type: str,
+                      assumptions: list[str]) -> dict | None:
+    """An internship allowance is not a salary: it gets no tax calculation."""
+    if contract_type == "internship":
+        assumptions.append("Internship allowance: no tax calculation applied.")
+        return None
+    return _net_estimate(found, country, rate, assumptions)
 
 
 def _net_estimate(found: dict, country: str, rate: FxRate, assumptions: list[str]) -> dict | None:

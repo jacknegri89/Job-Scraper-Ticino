@@ -36,6 +36,7 @@ from scrapers.gigroup_ch import scrape_gigroup_ch
 from scrapers.indeed_ch import scrape_indeed_ch
 from scrapers.jobs_ch import scrape_jobs_ch
 from scrapers.jobscout24_ch import scrape_jobscout24_ch
+from scrapers.italy_portals import scrape_indeed_it, scrape_linkedin_it
 from scrapers.linkedin_ch import scrape_linkedin_ch
 from scrapers.manpower_ch import scrape_manpower_ch
 from scrapers.monster_ch import scrape_monster_ch
@@ -45,6 +46,9 @@ from scrapers.randstad_ch import scrape_randstad_ch
 from scrapers.site_report import ScrapeError, classify_exception, run_report
 
 CACHE_FILE = Path("jobs_cache.json")
+
+# A listing page takes about 7 seconds to open; the rest are read on the next run.
+MAX_DESCRIPTIONS_PER_RUN = 60
 
 # Set by _apply_search_settings when a saved panel configuration is used.
 _AI_ENABLED = True
@@ -69,6 +73,8 @@ SCRAPERS: list[ScraperEntry] = [
     ("MANPOWER CH", "manpower.ch", scrape_manpower_ch),
     ("FRONTALIERETICINO CH", "frontaliereticino.ch", scrape_frontaliereticino_ch),
     ("LINKEDIN CH", "linkedin.ch", scrape_linkedin_ch),
+    ("INDEED IT", "indeed.it", scrape_indeed_it),
+    ("LINKEDIN IT", "linkedin.it", scrape_linkedin_it),
 ]
 
 PROBES: dict[str, ProbeEntry] = {
@@ -90,6 +96,9 @@ PROBES: dict[str, ProbeEntry] = {
     "manpower.ch": ("https://www.manpower.ch/it/trova-lavoro/citta/lugano",
                     'a[href*="/it/job/"]'),
     "linkedin.ch": ("https://www.linkedin.com/jobs/search/?keywords=&location=Ticino%2C+Switzerland",
+                    '[class*="base-card"]'),
+    "indeed.it": ("https://it.indeed.com/jobs?q=sviluppatore&l=Lombardia", "a[data-jk]"),
+    "linkedin.it": ("https://www.linkedin.com/jobs/search/?keywords=sviluppatore&location=Lombardia%2C+Italia",
                     '[class*="base-card"]'),
 }
 
@@ -371,7 +380,10 @@ def _download_descriptions(context: Any, valid_jobs: list[dict]) -> None:
     jobs_to_download = [job for job in valid_jobs if _needs_description(job)]
     if not jobs_to_download:
         return
-    _download_description_batch(context, jobs_to_download, len(valid_jobs))
+    left_for_next_run = len(jobs_to_download) - MAX_DESCRIPTIONS_PER_RUN
+    if left_for_next_run > 0:
+        print(f"[DESC] Opening the {MAX_DESCRIPTIONS_PER_RUN} newest pages now; {left_for_next_run} more on the next run.")
+    _download_description_batch(context, jobs_to_download[:MAX_DESCRIPTIONS_PER_RUN], len(valid_jobs))
 
 
 def _needs_description(job: dict) -> bool:
@@ -385,7 +397,7 @@ def _download_description_batch(context: Any, jobs_to_download: list[dict], tota
     started_at = time.perf_counter()
     step_times: list[float] = []
     cached_count = total_valid - len(jobs_to_download)
-    print(f"\n=== DESCRIPTIONS ({len(jobs_to_download)} to download, {cached_count} cached) ===")
+    print(f"\n=== DESCRIPTIONS ({len(jobs_to_download)} to download now, {cached_count} other jobs of {total_valid}) ===")
     for index, job in enumerate(jobs_to_download):
         _download_one_description(context, job, index, jobs_to_download, started_at, step_times)
     _print_progress(len(jobs_to_download), len(jobs_to_download),
@@ -662,6 +674,8 @@ def _apply_search_settings(settings: dict, args: argparse.Namespace) -> None:
     if args.timeout <= 0:
         config.PAGE_TIMEOUT_MS = settings["timeout_ms"]
     config.MAX_ATTEMPTS = settings["attempts"]
+    config.SEARCH_PLACE = settings["home_city"]
+    config.SEARCH_RADIUS_KM = settings["radius_km"]
     if not args.only:
         args.only = ",".join(settings["sources"])
     else:

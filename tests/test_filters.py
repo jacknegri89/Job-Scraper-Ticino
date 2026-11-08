@@ -185,3 +185,23 @@ def test_software_and_ai_titles_are_tech_without_false_positives() -> None:
     assert categorize_job("Machine Learning Engineer") == "tech"
     assert categorize_job("Assistant Manager") == "other"
     assert categorize_job("Business Developer") == "other"
+
+
+def test_machining_titles_are_not_software_even_with_programmer_in_them() -> None:
+    assert categorize_job("Programmatore a Controllo Numerico (CNC)") == "technical"
+    assert categorize_job("OPERATORE PROGRAMMATORE MACCHINE CNC") == "technical"
+    assert categorize_job("Programmatore Cobol AS400") == "tech"
+
+
+def test_remote_listings_are_excluded_unless_wanted_and_the_place_is_still_read() -> None:
+    remote = _job(city="Remoto in Seveso, Lombardia", url="https://example.ch/remote", source="indeed.it")
+    result = process_jobs([remote], _preferences())
+    assert result.jobs == []
+    assert result.stats["indeed.it"].excluded["remote"] == 1
+    wanted = _kept([remote], _preferences(include_remote=True))
+    assert wanted[0]["work_mode"] == "remote"
+    assert wanted[0]["place_name"] == "Seveso"
+    hybrid = normalize_job(_job(city="Ibrido a Milano"))
+    assert hybrid["work_mode"] == "hybrid"
+    assert hybrid["place_name"] == "Milano"
+    assert len(_kept([_job(city="Ibrido a Milano")])) == 1

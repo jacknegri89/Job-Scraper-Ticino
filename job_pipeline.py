@@ -14,6 +14,7 @@ from job_model import normalize_job
 from preferences import SearchPreferences
 
 REASON_INVALID_URL = "invalid_url"
+REASON_REMOTE = "remote"
 REASON_OUT_OF_AREA = "out_of_area"
 REASON_UNCERTAIN_LOCATION = "uncertain_location"
 REASON_CATEGORY = "category"
@@ -43,6 +44,8 @@ def exclusion_reason(job: dict, preferences: SearchPreferences) -> str:
     """Return why a normalized job is not wanted, or '' when it is."""
     if not is_safe_job_url(job.get("url")):
         return REASON_INVALID_URL
+    if job.get("work_mode") == geo.WORK_MODE_REMOTE and not preferences.include_remote:
+        return REASON_REMOTE
     area_status = geo.classify_area(_location_of(job), preferences.area)
     job[AREA_STATUS_FIELD] = area_status
     if area_status == geo.AREA_OUT:

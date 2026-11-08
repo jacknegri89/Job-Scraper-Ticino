@@ -61,3 +61,13 @@ def test_implausible_amount_for_the_period_is_ambiguous() -> None:
 def test_text_without_currency_returns_nothing() -> None:
     assert extract_salary("Cerchiamo 3 anni di esperienza e 2.000 candidati") is None
     assert extract_salary("") is None
+
+
+def test_up_to_and_from_amounts_are_limits_not_exact_pay() -> None:
+    upper = extract_salary("Fino a 48.000 euro all'anno")
+    lower = extract_salary("A partire da 30.000 euro all'anno")
+    exact = extract_salary("30.000 euro all'anno")
+    assert upper["bound"] == "max"
+    assert lower["bound"] == "min"
+    assert exact["bound"] == "exact"
+    assert extract_salary("28.000 - 32.000 euro all'anno")["bound"] == "exact"

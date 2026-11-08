@@ -91,6 +91,7 @@
       <label for="places">Always include these places</label>
       <textarea id="places" maxlength="4000" rows="2" aria-describedby="places-hint"></textarea>
       <p class="hint" id="places-hint">Optional. One town or province code per line, for example Lugano or BS. These are included even when they are farther than the distance above.</p>
+      <label class="choice"><input type="checkbox" id="include-remote"> Also show fully remote listings</label>
       <label class="choice"><input type="checkbox" id="include-uncertain"> Also show listings whose location is not precise</label>
       <p class="hint">For example "Lombardia" or "Milan area". They are marked on the dashboard and get no distance.</p>
     </section>
@@ -248,6 +249,7 @@ function collectSettings() {
     schema_version: data.settings.schema_version,
     regions, radius_km: radius, include_places: splitLines(byId("places").value),
     include_uncertain_location: byId("include-uncertain").checked,
+    include_remote: byId("include-remote").checked,
     categories, seniority_levels: seniority, contract_types: contracts,
     sources, search_terms: terms,
     home_city: homeCity, home_lat: homeLat, home_lng: homeLng,
@@ -333,6 +335,7 @@ byId("use-radius").checked = saved.radius_km !== null;
 byId("radius").value = saved.radius_km ?? "";
 byId("places").value = saved.include_places.join("\n");
 byId("include-uncertain").checked = saved.include_uncertain_location;
+byId("include-remote").checked = saved.include_remote;
 byId("terms").value = saved.search_terms.join("\n");
 byId("use-distance").checked = saved.home_lat !== null;
 byId("home-city").value = saved.home_city;

@@ -68,7 +68,8 @@ KEYWORDS = {
         "Tecnico elettronico", "Assemblatore elettronico",
         "Montatore elettronico", "Tecnico di laboratorio",
         "Elettrotecnico",
-        "Operatore CNC", "Programmatore CNC", "Operatore macchine utensili",
+        "Programmatore CNC", "Programmatore macchine", "Operatore CNC", "Controllo numerico",
+        "Operatore macchine utensili",
         "Elettricista", "Tecnico elettrico", "Installatore elettrico",
     ],
     "logistics": [
@@ -158,13 +159,18 @@ _CATEGORY_PATTERNS["tech"].append(re.compile(r"(?<!\w)ai(?!\w)"))
 _NOT_SOFTWARE = re.compile(r"business develop|sviluppo commerciale|sviluppatore commerciale|sviluppo business")
 
 
+# Machining and electrical titles are checked before software ones: "Programmatore CNC"
+# is a machinist, not a developer.
+_CATEGORY_ORDER = (CATEGORY_TECHNICAL, *(name for name in KEYWORDS if name != CATEGORY_TECHNICAL))
+
+
 def categorize_job(title: str) -> str:
     """Assign a broad category from the job title."""
     title_lower = (title or "").lower()
-    for category, patterns in _CATEGORY_PATTERNS.items():
+    for category in _CATEGORY_ORDER:
         if category == CATEGORY_TECH and _NOT_SOFTWARE.search(title_lower):
             continue
-        if any(pattern.search(title_lower) for pattern in patterns):
+        if any(pattern.search(title_lower) for pattern in _CATEGORY_PATTERNS[category]):
             return category
     return CATEGORY_OTHER
 

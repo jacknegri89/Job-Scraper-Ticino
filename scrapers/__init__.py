@@ -54,6 +54,7 @@ DESCRIPTION_HOSTS = frozenset({
     "www.jobs.ch", "www.carriera.ch", "ch.gigroup.com", "www.randstad.ch",
     "www.orienta.ch", "www.jobscout24.ch", "ch.indeed.com", "www.adecco.com",
     "www.manpower.ch", "frontaliereticino.ch", "www.linkedin.com",
+    "it.indeed.com", "it.linkedin.com",
 })
 
 

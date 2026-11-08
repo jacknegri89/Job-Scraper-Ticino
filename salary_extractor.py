@@ -46,6 +46,11 @@ _EMPLOYMENT_PERCENT = re.compile(
     r"(?:impiego|pensum|occupazione|tempo)[^\d%]{0,20}(\d{2,3})\s?%|(\d{2,3})\s?%\s?(?:di\s+)?(?:impiego|pensum|occupazione)",
     re.IGNORECASE,
 )
+_UPPER_LIMIT_WORDS = re.compile(r"(?:fino a|up to|bis zu|al massimo|massimo|max\.?)\s*$", re.IGNORECASE)
+_LOWER_LIMIT_WORDS = re.compile(r"(?:a partire da|almeno|minimo|from|ab|min\.?)\s*$", re.IGNORECASE)
+BOUND_EXACT = "exact"
+BOUND_MAX = "max"
+BOUND_MIN = "min"
 _CONTEXT_AFTER = 45
 _CONTEXT_BEFORE = 30
 _SNIPPET_LENGTH = 90
@@ -91,11 +96,23 @@ def _read_candidate(text: str, match: re.Match, default_currency: str) -> dict |
         "period": period,
         "min": low_amount,
         "max": high_amount,
+        "bound": _bound_of(before_text, low_amount, high_amount),
         "basis": _basis_of(after_text, before_text),
         "payments": _payments_of(before_text + text[match.start():match.end()] + after_text),
         "employment_percent": _employment_percent(text),
         "text": snippet,
     }
+
+
+def _bound_of(before_text: str, low_amount: float, high_amount: float) -> str:
+    """A single amount after 'up to' or 'from' is a limit, not the exact pay."""
+    if low_amount != high_amount:
+        return BOUND_EXACT
+    if _UPPER_LIMIT_WORDS.search(before_text):
+        return BOUND_MAX
+    if _LOWER_LIMIT_WORDS.search(before_text):
+        return BOUND_MIN
+    return BOUND_EXACT
 
 
 def _currency_of(match: re.Match, before_text: str, default_currency: str) -> str:

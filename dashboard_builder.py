@@ -68,6 +68,8 @@ SOURCE_LABEL: dict[str, str] = {
     "manpower.ch":          "Manpower",
     "frontaliereticino.ch": "frontaliereticino.ch",
     "linkedin.ch":          "LinkedIn",
+    "indeed.it":            "Indeed Italia",
+    "linkedin.it":          "LinkedIn Italia",
 }
 
 COUNTRY_LABEL = {"IT": "Italy", "CH": "Switzerland"}
@@ -95,6 +97,7 @@ SALARY_FILTERS = (
 )
 PERIOD_LABEL = {"month": "month", "year": "year", "hour": "hour"}
 BASIS_LABEL = {"gross": "gross", "net": "net", "unknown": "gross or net not stated"}
+BOUND_PREFIX = {"max": "up to ", "min": "from "}
 NO_DATE_TEXT = "Not stated"
 NOT_TRACKED_TEXT = "Before tracking"
 
@@ -234,7 +237,8 @@ def _written_amount(salary: dict) -> str:
     """The amount exactly as it is known: range, currency, period and gross/net."""
     period = PERIOD_LABEL.get(salary["period"], salary["period"])
     basis = BASIS_LABEL.get(salary["basis"], "")
-    parts = [f'{_amount_range(salary["min"], salary["max"])} {_escape_html(salary["currency"])} / {period}']
+    prefix = BOUND_PREFIX.get(salary.get("bound", "exact"), "")
+    parts = [f'{prefix}{_amount_range(salary["min"], salary["max"])} {_escape_html(salary["currency"])} / {period}']
     if basis:
         parts.append(basis)
     return ", ".join(parts)

@@ -37,6 +37,15 @@ _REGION_WORDS = {
 _COUNTRY_WORDS = {"italia", "italy", "svizzera", "schweiz", "switzerland", "suisse", "ch", "it"}
 _VAGUE_MARKERS = ("hinterland", "dintorni", "provincia", "province", "remot", "smart working", "tutta", "varie", "diverse")
 _POSTAL_CODE = re.compile(r"\b\d{4,5}\b")
+# Portals write "Remoto in Lomazzo" or "Ibrido a Milano": the place is what follows.
+_WORK_MODE_PREFIX = re.compile(
+    r"^(?:remoto|remote|ibrido|hybrid|home\s?working|smart\s?working|telelavoro)\s+(?:in|a|presso|da|-)\s+",
+    re.IGNORECASE)
+_REMOTE_WORDS = re.compile(r"\b(?:remoto|remote|da casa|home\s?working|smart\s?working|telelavoro)\b", re.IGNORECASE)
+_HYBRID_WORDS = re.compile(r"\b(?:ibrido|hybrid)\b", re.IGNORECASE)
+WORK_MODE_REMOTE = "remote"
+WORK_MODE_HYBRID = "hybrid"
+WORK_MODE_ONSITE = ""
 _PROVINCE_SUFFIX = re.compile(r"[\s,(/-]+\(?([A-Za-z]{2})\)?\s*$")
 
 
@@ -130,7 +139,7 @@ def _narrow_candidates(candidates: list[Place], province: str, country: str) -> 
 
 def resolve_location(raw_location: str | None, country_hint: str = "") -> Location:
     """Turn text such as 'Monza MB', '6830 Chiasso' or 'Lombardia' into a Location."""
-    text = (raw_location or "").strip()
+    text = _WORK_MODE_PREFIX.sub("", (raw_location or "").strip())
     if not text:
         return Location(CERTAINTY_UNKNOWN)
     parts = [part.strip() for part in re.split(r"[,|]", text) if part.strip()]
@@ -141,6 +150,16 @@ def resolve_location(raw_location: str | None, country_hint: str = "") -> Locati
     if suffix_province:
         province_hint = suffix_province
     return _resolve_name(name, province_hint, hints["region"], country_hint)
+
+
+def work_mode_of(raw_location: str | None) -> str:
+    """'remote', 'hybrid' or '' (on site) as written in the location text."""
+    text = raw_location or ""
+    if _HYBRID_WORDS.search(text):
+        return WORK_MODE_HYBRID
+    if _REMOTE_WORDS.search(text):
+        return WORK_MODE_REMOTE
+    return WORK_MODE_ONSITE
 
 
 def _hints_from_parts(parts: list[str]) -> dict[str, str]:

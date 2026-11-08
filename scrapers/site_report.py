@@ -114,17 +114,19 @@ class RunReport:
     def print_table(self) -> None:
         if not self._results:
             return
-        W_SITE, W_STAT = 24, 22
-        print("\n" + "=" * 78)
-        print(f"  {'SITE':<{W_SITE}}{'STATUS':<{W_STAT}}{'JOBS':>5}  {'TIME':>7}  NOTE")
-        print("-" * 78)
+        width_site, width_status = 22, 16
+        line = "=" * 92
+        print("\n" + line)
+        print(f"  {'SITE':<{width_site}}{'STATUS':<{width_status}}{'READ':>5}{'VALID':>7}{'DUPES':>7}{'OUT':>5}  {'TIME':>6}  NOTE")
+        print("-" * 92)
         for r in self.results:
-            note = r.reason[:40] if r.reason else ""
-            print(f"  {r.site:<{W_SITE}}{r.status:<{W_STAT}}{r.jobs:>5}"
-                  f"  {r.duration_s:>6.0f}s  {note}")
-        print("=" * 78)
-        n_ok = sum(1 for r in self.results if r.status in ("ok", "ok_partial"))
-        print(f"  {n_ok}/{len(self.results)} sites reported ok or partial\n")
+            note = r.reason[:32]
+            excluded_total = sum(r.excluded.values())
+            print(f"  {r.site:<{width_site}}{r.status:<{width_status}}{r.jobs:>5}{r.valid:>7}{r.duplicates:>7}"
+                  f"{excluded_total:>5}  {r.duration_s:>5.0f}s  {note}")
+        print(line)
+        sites_read = sum(1 for r in self.results if r.status in USABLE_STATUSES)
+        print(f"  Overall: {self.overall_status()} ({sites_read}/{len(self.results)} sites read)\n")
 
 
 def overall_status(results: list[SiteResult]) -> str:

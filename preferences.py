@@ -19,6 +19,7 @@ class SearchPreferences:
 
     area: AreaPolicy = field(default_factory=AreaPolicy)
     include_uncertain_location: bool = False
+    include_remote: bool = False
     categories: frozenset[str] | None = None
     seniority_levels: frozenset[str] | None = None
     contract_types: frozenset[str] | None = None
@@ -39,6 +40,7 @@ def preferences_from_settings(settings: dict) -> SearchPreferences:
     return SearchPreferences(
         area=area,
         include_uncertain_location=bool(settings.get("include_uncertain_location", False)),
+        include_remote=bool(settings.get("include_remote", False)),
         categories=_optional_set(settings.get("categories")),
         seniority_levels=_optional_set(settings.get("seniority_levels")),
         contract_types=_optional_set(settings.get("contract_types")),
