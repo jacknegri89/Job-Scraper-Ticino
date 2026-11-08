@@ -28,7 +28,7 @@ jobs:
       - name: Lint (errors and likely bugs)
         run: |
           python -m pip install ruff
-          python -m ruff check . --select F,E9,B
+          python -m ruff check .
 
       - name: Run tests
         run: python -m pytest -q

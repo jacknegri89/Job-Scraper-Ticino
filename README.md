@@ -1,155 +1,181 @@
+<div align="center">
+
 # Job Scraper Ticino
 
+**Eleven Swiss job portals, one private dashboard.**<br>
+Built for cross-border commuters who live in Italy and work in the Mendrisiotto (Ticino).
+
 [![CI](https://github.com/jacknegri89/Job-Scraper-Ticino/actions/workflows/ci.yml/badge.svg)](https://github.com/jacknegri89/Job-Scraper-Ticino/actions/workflows/ci.yml)
-![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-[![Licenza MIT](https://img.shields.io/badge/licenza-MIT-green)](./LICENSE)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
+![Playwright](https://img.shields.io/badge/scraping-Playwright-2EAD33?logo=playwright&logoColor=white)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+![Runs locally](https://img.shields.io/badge/runs-100%25%20locally-C8102E)
 
-Raccoglie gli annunci di lavoro di dodici portali svizzeri, tiene solo quelli nei comuni del Mendrisiotto e li mostra in una dashboard HTML con ricerca, filtri, distanza da casa e stima dello stipendio netto per chi vive in Italia e lavora in Ticino (frontalieri). Gira in locale: nessun server, nessun account da creare.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-dark.png">
+  <img src="docs/dashboard-light.png" alt="The dashboard: a filter rail on the left and one ticket-style row per job, with a distance ruler, an estimated Italian net salary and a link to the original listing" width="920">
+</picture>
 
-![Dashboard con la lista degli annunci, i filtri a sinistra e il righello dei chilometri su ogni annuncio](docs/dashboard.jpg)
+<sub>The dashboard follows your system theme. Screenshot generated with fictional sample data.</sub>
 
-*Dashboard generata con dati di esempio.*
+</div>
 
-## Cosa offre
+## Why this exists
 
-- **Dodici fonti** in un'unica lista, senza duplicati tra portali.
-- **Otto comuni**: Chiasso, Mendrisio, Stabio, Balerna, Coldrerio, Morbio Inferiore, Novazzano e Riva San Vitale.
-- **Dashboard** con ricerca, ordinamento per data o distanza, filtro per categoria e tema chiaro o scuro in base al sistema. È un unico file `index.html` che non carica nulla da Internet.
-- **Distanza in linea d'aria** da una località di partenza a scelta (facoltativa).
-- **Stima del netto in Italia** a partire dal lordo mensile, con i contributi svizzeri, l'imposta alla fonte ticinese e l'eventuale imposta italiana aggiuntiva.
-- **Analisi AI facoltativa** (OpenAI): dice se l'annuncio è adatto al tuo profilo e ne ricava lordo stimato e riassunto.
-- **Pannello di configurazione locale** nel browser, per scegliere comuni, fonti e parole di ricerca senza toccare il codice.
-- **Cache e report**: se un portale fallisce, gli annunci precedenti restano e `scan_report.json` spiega cosa è andato storto.
+Looking for a job across the border means checking a dozen portals, each with its own filters, and still not knowing the one thing that matters: *what would I actually take home in Italy, and how far is it from my door?*
 
-## Fonti
+Job Scraper Ticino collects the listings for you, keeps only the eight municipalities around Chiasso and Mendrisio, removes duplicates, and turns the result into a single searchable page. It runs on your computer. There is no server, no account and no tracking.
 
-| Fonte | Note |
-|---|---|
-| jobs.ch, carriera.ch, Gi Group, Randstad, Orienta, JobScout24, Adecco, Manpower | Ricerca sulle pagine pubbliche. |
-| Indeed | Solo modalità pubblica; non usa la sessione salvata. |
-| frontaliereticino.ch | Legge l'indice JSON pubblicato dal sito. |
-| LinkedIn | Pagine pubbliche; per il login manuale usa `--auth linkedin`. |
-| Monster | Disattivato: il portale reindirizza a monster.com. |
+## Features
 
-I portali cambiano spesso. Dopo l'installazione, e ogni tanto in seguito, esegui `python main.py --dry-run`: controlla in pochi minuti quali fonti rispondono ancora e scrive il risultato in `scan_report.json`.
+- **One list, eleven portals.** jobs.ch, carriera.ch, Gi Group, Randstad, Orienta, JobScout24, Indeed, Adecco, Manpower, frontaliereticino.ch and LinkedIn, merged and de-duplicated.
+- **Eight municipalities.** Chiasso, Mendrisio, Stabio, Balerna, Coldrerio, Morbio Inferiore, Novazzano and Riva San Vitale.
+- **Estimated net pay in Italy.** From a monthly gross figure it estimates Swiss social contributions, Ticino withholding tax and any additional Italian income tax, using the cross-border rules in force after 17 July 2023.
+- **Distance from home.** A straight-line distance and a small ruler on every listing, from any starting point you choose. Optional.
+- **Optional AI rating.** OpenAI can tell you whether a listing fits your profile, estimate the gross salary and write a short summary. Off by default.
+- **Local control panel.** Pick municipalities, sources and search terms in the browser instead of editing code.
+- **Resilient by design.** If a portal fails or returns nothing, its previous listings stay in the cache and `scan_report.json` tells you what happened. An interrupted scan never overwrites the cache.
+- **A dashboard you can trust.** A single `index.html` that loads nothing from the internet, follows your light or dark theme and escapes everything it shows.
 
-## Installazione
+## Quick start
 
-Serve Python 3.10 o successivo. Dalla cartella del progetto:
+You need Python 3.10 or later.
 
 ```bash
+git clone https://github.com/jacknegri89/Job-Scraper-Ticino.git
+cd Job-Scraper-Ticino
+
 python -m venv .venv
-```
+# Windows:      .venv\Scripts\activate
+# macOS/Linux:  source .venv/bin/activate
 
-Attiva l'ambiente con `.venv\Scripts\activate` su Windows, oppure con `source .venv/bin/activate` su macOS e Linux. Poi:
-
-```bash
-python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python -m playwright install chromium
-```
 
-Chromium usa il proprio sandbox. Su Linux, se il browser segnala un errore di sandbox, configura il sistema prima di avviare lo scraper.
-
-## Avvio
-
-```bash
 python main.py
 ```
 
-Senza argomenti si apre il **pannello di configurazione** nel browser. Scegli comuni, fonti e parole di ricerca, poi premi «Avvia ricerca»: la ricerca parte in background e, a fine lavoro, si apre la dashboard. Il pannello ascolta solo su `127.0.0.1`, con un indirizzo segreto diverso a ogni avvio.
+`python main.py` opens the local control panel in your browser. Choose what to search, press **Start search**, and the dashboard opens when the search finishes.
 
-Su Windows puoi usare `Avvia.bat`, che apre il pannello senza finestra del terminale (richiede l'ambiente `.venv` creato sopra).
+On Windows you can double-click `start_panel.bat` instead, which opens the panel without a terminal window.
 
-Le scelte sono salvate in `user_settings.json`. Per ripetere la ricerca senza pannello, ad esempio da uno script:
+<details>
+<summary><b>Screenshot of the control panel</b></summary>
+<br>
+<img src="docs/panel.png" alt="The control panel: municipalities, sources, search terms, distance, optional AI analysis and run options" width="620">
+</details>
 
-```bash
-python main.py --background --headless --project-dir
+> **Linux note:** Chromium runs with its own sandbox. If the browser reports a sandbox error, configure the host before starting the scraper.
+
+## How it works
+
+```mermaid
+flowchart LR
+    A["Control panel<br/>or command line"] --> B["Playwright scrapers<br/>one module per portal"]
+    B --> C["Filter and de-duplicate<br/>8 municipalities"]
+    C --> D["Fetch descriptions<br/>allow-listed hosts only"]
+    D --> E["Optional AI rating"]
+    E --> F[("jobs_cache.json")]
+    F --> G["index.html<br/>dashboard"]
 ```
 
-### Ricerca automatica ogni giorno (Windows)
+1. Each portal has its own module in [`scrapers/`](scrapers) that opens the pages with Chromium and extracts the listings.
+2. [`job_filter.py`](job_filter.py) keeps the allowed municipalities, assigns a category and removes duplicates.
+3. Descriptions are downloaded only from the expected HTTPS hosts, in a separate browser context with no JavaScript and no saved session. Requests and redirects to any other host are blocked.
+4. Descriptions and AI results already in the cache are reused, so you never pay twice for the same listing.
+5. [`dashboard_builder.py`](dashboard_builder.py) writes `index.html`.
 
-`setup_task_scheduler.bat` crea un'attività di Windows che alle 08:00 esegue la ricerca in background con le ultime impostazioni salvate. Per aggiornare un'attività creata con una versione precedente, esegui di nuovo lo script.
+## Sources
 
-## Comandi
-
-| Comando | Funzione |
+| Source | Notes |
 |---|---|
-| `python main.py` | Apre il pannello di configurazione. |
-| `python main.py --background` | Esegue la ricerca con le impostazioni salvate, senza pannello. |
-| `python main.py --scan-only` | Raccoglie gli annunci e scrive il report, senza descrizioni, AI, dashboard o modifica della cache. |
-| `python main.py --dry-run` | Controlla rapidamente accesso, blocchi e selettori di ogni fonte. |
-| `python main.py --only jobs.ch,indeed` | Limita la ricerca alle fonti indicate; gli annunci delle altre restano in cache. |
-| `python main.py --headless` | Usa Chromium senza finestra visibile. |
-| `python main.py --project-dir` | Scrive i file nella cartella del progetto anche se avviato da un'altra. |
-| `python main.py --timeout 45000` | Imposta il timeout di navigazione, in millisecondi. |
-| `python main.py --auth linkedin` | Apre il login manuale e salva la sessione. |
-| `python main.py --reanalyze` | Analizza con l'AI solo gli annunci in cache che non hanno ancora un risultato, senza nuova scansione. |
-| `python main.py --panel` | Apre il pannello anche quando altri argomenti lo disattiverebbero. |
+| jobs.ch, carriera.ch, Gi Group, Randstad, Orienta, JobScout24, Adecco, Manpower | Public search pages. |
+| Indeed | Public mode only. It does not use the saved session. |
+| frontaliereticino.ch | Reads the JSON index the site publishes. |
+| LinkedIn | Public pages. Use `--auth linkedin` for a manual login. |
+| Monster | Disabled: the portal redirects to monster.com. |
 
-## Configurazione
+Portals change their pages often, so run `python main.py --dry-run` after installing and every now and then. It checks in a few minutes which sources still respond and writes the outcome to `scan_report.json`. On 2026-11-08 it reached all eleven active portals.
 
-Ci sono due modi, che si possono combinare: il pannello (consigliato) oppure il file `user_config.py`.
+## Command line
 
-| Impostazione | Dove | Funzione |
+The panel covers everyday use. The command line is there for scripts and for debugging.
+
+| Command | What it does |
+|---|---|
+| `python main.py` | Opens the control panel. |
+| `python main.py --background --headless --project-dir` | Runs a search with the saved settings and no panel. |
+| `python main.py --scan-only` | Collects listings and writes the report, without descriptions, AI, dashboard or cache changes. |
+| `python main.py --dry-run` | Quickly checks access, blocks and selectors for each source. |
+| `python main.py --only jobs.ch,indeed` | Limits the search to the given sources and keeps the others in the cache. |
+| `python main.py --reanalyze` | Runs the AI only on cached listings that have no result yet, with no new scan. |
+| `python main.py --timeout 45000` | Sets the navigation timeout, in milliseconds. |
+| `python main.py --auth linkedin` | Opens a manual login and saves the session. |
+| `python main.py --panel` | Opens the panel even when other arguments would skip it. |
+
+### Run it every morning (Windows)
+
+`setup_task_scheduler.bat` creates a Windows task that runs a background search at 08:00 with your last saved settings. Run it again to update a task created by an earlier version.
+
+## Configuration
+
+Use the panel (recommended), a `user_config.py` file, or both.
+
+| Setting | Where | Purpose |
 |---|---|---|
-| Comuni, fonti, parole di ricerca | Pannello (`user_settings.json`) | Cosa cercare. Le parole valgono per jobs.ch; gli altri portali hanno strategie proprie. |
-| Località di partenza e coordinate | Pannello o `user_config.py` | Per le distanze. Se mancano, le distanze non vengono mostrate. |
-| Profilo per l'AI | Pannello o `user_config.py` | Testo inviato al modello per valutare gli annunci. |
-| `OPENAI_API_KEY` | Variabile d'ambiente | Abilita l'analisi AI. Non si inserisce né nel pannello né nel codice. |
-| `SCRAPER_HEADLESS`, `SCRAPER_TIMEOUT_MS`, `SCRAPER_ATTEMPTS` | Variabili d'ambiente | Browser senza finestra, timeout e tentativi per fonte (massimo 3). |
+| Municipalities, sources, search terms | Panel (`user_settings.json`) | What to search. The terms apply to jobs.ch; the other portals use their own strategies. |
+| Starting point and coordinates | Panel or `user_config.py` | Used for distances. Without them, distances are not shown. |
+| Profile for the AI | Panel or `user_config.py` | Text sent to the model to rate listings. |
+| `OPENAI_API_KEY` | Environment variable | Enables the AI rating. It is never typed into the panel or stored on disk. |
+| `SCRAPER_HEADLESS`, `SCRAPER_TIMEOUT_MS`, `SCRAPER_ATTEMPTS` | Environment variables | Hidden browser, navigation timeout, attempts per source (at most 3). |
 
-Per usare `user_config.py`, copia il modello (`copy user_config.example.py user_config.py` in PowerShell, `cp user_config.example.py user_config.py` altrove) e compila coordinate, nome della località e profilo. Le coordinate sono in gradi decimali, ad esempio `45.83` e `9.03`.
+To use `user_config.py`, copy the template (`copy user_config.example.py user_config.py` in PowerShell, `cp user_config.example.py user_config.py` elsewhere) and fill in your coordinates, the name of your starting point and your profile. Coordinates are decimal degrees, for example `45.83` and `9.03`.
 
-Le date sconosciute restano vuote e le date relative («2 giorni fa») sono approssimative.
+Unknown dates stay empty, and relative dates such as "2 days ago" are approximate.
 
-## Come funziona
+## Privacy and security
 
-1. Ogni fonte ha un modulo in `scrapers/` che apre le pagine con Chromium (Playwright) e ne estrae gli annunci.
-2. `job_filter.py` tiene solo i comuni consentiti, assegna una categoria e toglie i duplicati.
-3. Le descrizioni si scaricano solo da host HTTPS dei portali previsti, in un contesto separato, senza JavaScript né sessioni salvate. Richieste e reindirizzamenti verso altri host sono bloccati.
-4. Descrizioni e risultati AI già presenti in cache vengono riutilizzati, così non si paga due volte la stessa analisi.
-5. `dashboard_builder.py` scrive `index.html`. Una scansione interrotta non sostituisce la cache principale.
+- **Everything stays on your machine.** The only data that ever leaves it is what you send to OpenAI if you turn the AI rating on: your profile and the text of the listings.
+- **The panel is locked down.** It listens on `127.0.0.1` only, behind a secret address that changes on every start, and checks the origin, a CSRF token and a request limit.
+- **The dashboard is inert.** It carries a Content-Security-Policy that blocks every external resource, and all scraped text is escaped.
+- **Personal files are never committed.** `user_config.py`, `user_settings.json`, `jobs_cache.json`, `scan_report.json`, `scraper.log`, `debug/`, `profile/` and `index.html` are in `.gitignore` because they can contain your profile, cookies, contact emails and portal content.
+- **Be a good guest.** Listings belong to the portals that publish them. Read each source's terms of use before scraping, and do not publish your dashboard or cache without checking what they contain.
+- **Estimates are estimates.** The AI's gross figure and the computed net pay are indicative. They are not an offer or personal tax advice. Always check the original listing.
 
-Se una fonte fallisce, è bloccata o restituisce risultati vuoti, i suoi annunci precedenti restano in cache e non vengono aggiornati: controlla `scan_report.json`.
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
-## Struttura del progetto
+## Project structure
 
-| File o cartella | Responsabilità |
+| Path | Responsibility |
 |---|---|
-| `main.py` | Comandi, coordinamento delle scansioni e cache. |
-| `setup_panel.py`, `setup_panel.html` | Pannello locale: server su `127.0.0.1` e pagina di configurazione. |
-| `startup_config.py` | Lettura, controllo e salvataggio di `user_settings.json`. |
-| `job_filter.py` | Comuni, termini di ricerca, categorie, normalizzazione e duplicati. |
-| `distance_calculator.py` | Distanze in linea d'aria. |
-| `salary_calculator.py` | Stima indicativa del netto da un lordo mensile. |
-| `ai_analyzer.py` | Analisi AI facoltativa. |
-| `dashboard_builder.py` | Generazione della dashboard HTML. |
-| `scrapers/` | Un modulo per fonte, più browser, sessioni, rilevamento dei blocchi e report. |
-| `tests/` | Test automatici di filtri, dashboard, pannello, cache, scraper e calcoli. |
+| [`main.py`](main.py) | Commands, scan coordination and cache. |
+| [`setup_panel.py`](setup_panel.py), [`setup_panel.html`](setup_panel.html) | The local panel: a `127.0.0.1` server and its page. |
+| [`startup_config.py`](startup_config.py) | Reading, validating and saving `user_settings.json`. |
+| [`job_filter.py`](job_filter.py) | Municipalities, search terms, categories, normalisation and duplicates. |
+| [`distance_calculator.py`](distance_calculator.py) | Straight-line distances. |
+| [`salary_calculator.py`](salary_calculator.py) | Indicative net pay from a monthly gross figure. |
+| [`ai_analyzer.py`](ai_analyzer.py) | Optional AI rating. |
+| [`dashboard_builder.py`](dashboard_builder.py) | Dashboard generation. |
+| [`scrapers/`](scrapers) | One module per portal, plus browser setup, sessions, block detection and the scan report. |
+| [`tests/`](tests) | Automated tests for filters, dashboard, panel, cache, scrapers and calculations. |
 
-## Sviluppo e test
+## Development
 
 ```bash
 python -m pytest -q
+python -m ruff check .
 ```
 
-I test non contattano i portali: coprono filtri, dashboard, pannello locale, distanze, stime, tentativi, cache, paginazione, validazione AI e filtro degli URL. Non dimostrano da soli che i portali funzionino oggi: per quello usa `python main.py --dry-run`. La CI di GitHub esegue i test con Python 3.10 e 3.12.
+The tests never contact the portals. They cover filters, the dashboard, the local panel, distances, salary estimates, retries, the cache, pagination, AI validation and URL filtering. They cannot prove that the portals work today: use `python main.py --dry-run` for that. GitHub Actions runs the linter and the tests on Python 3.10 and 3.12.
 
-## Privacy, sicurezza e note legali
+Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to set up, how to add a new source and what a good pull request looks like.
 
-- Tutto resta sul tuo computer. L'unico invio verso l'esterno è l'analisi AI, se la attivi: in quel caso il tuo profilo e il testo degli annunci vanno a OpenAI.
-- Non versionare e non condividere `user_config.py`, `user_settings.json`, `jobs_cache.json`, `scan_report.json`, `scraper.log`, `debug/`, `profile/` e `index.html`: possono contenere il tuo profilo, cookie, email di contatto e contenuti dei portali. Sono già nel `.gitignore`.
-- Il pannello accetta solo richieste dal tuo computer, con indirizzo segreto, controllo di origine e token anti-CSRF, e limita il numero di richieste.
-- Gli annunci appartengono ai rispettivi portali. Controlla le condizioni d'uso di ogni fonte prima di usare lo scraper, e non pubblicare online la dashboard o la cache senza averne verificato il contenuto.
-- Il lordo stimato dall'AI e il netto calcolato sono indicativi: non sono un'offerta né un calcolo fiscale personalizzato. Verifica sempre l'annuncio originale.
+## Known limitations
 
-## Limiti noti
+- Each source depends on the structure of its site. A redesign can empty a portal's results until its module is updated.
+- A search started from a panel you have since closed is not recognised by a new panel: wait for it to finish before starting another.
+- jobs.ch returns listings for the whole of Ticino, so only a few results fall inside the eight municipalities.
 
-- Le fonti dipendono dalla struttura dei siti: un cambio di layout può azzerare i risultati di un portale finché non si aggiorna il suo modulo.
-- Il pannello non riconosce una ricerca avviata da un pannello chiuso in precedenza: aspetta che finisca prima di avviarne un'altra.
-- La dashboard è in inglese; il pannello e i messaggi del terminale sono in italiano.
+## License
 
-## Licenza
-
-[Licenza MIT](./LICENSE) © 2026 Giacomo Negri.
+[MIT](LICENSE) © 2026 Giacomo Negri.

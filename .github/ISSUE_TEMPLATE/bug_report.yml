@@ -1,0 +1,29 @@
+name: Bug report
+description: Something does not work, for example a portal returns no results.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Source
+      description: Which portal, if it is about one (for example jobs.ch).
+  - type: textarea
+    id: report
+    attributes:
+      label: Output of the dry run
+      description: Paste the table printed by `python main.py --dry-run --only <source>`. Remove anything personal.
+      render: text
+  - type: input
+    id: versions
+    attributes:
+      label: Python and operating system
+      placeholder: Python 3.12, Windows 11
+    validations:
+      required: true
