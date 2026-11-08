@@ -16,7 +16,10 @@ File layout:
   - generate_html: compute dashboard stats and fill the page template
 """
 
+import base64
+import hashlib
 import html as html_lib
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -553,7 +556,7 @@ _TEMPLATE = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="__CSP__">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="light dark">
 <title>JobScraper - Lombardy and Ticino jobs</title>
@@ -1136,15 +1139,48 @@ def generate_html(jobs: list[Job], output_path: str | Path = "index.html", fx_ra
     rate = fx_rate or manual_rate(None)
     normalized_jobs = [normalize_ai_fields(normalize_job(job)) for job in jobs]
     page = _dashboard_page(normalized_jobs, rate)
-    Path(output_path).write_text(page, encoding="utf-8")
+    _write_page_atomically(Path(output_path), page)
     print(f"[OK] Dashboard generated: {output_path} ({len(normalized_jobs)} jobs)")
+
+
+def _write_page_atomically(output_path: Path, page: str) -> None:
+    """Write next to the target and replace it in one step, so a crash never leaves half a page."""
+    temporary_path = output_path.with_name(f".{output_path.name}.tmp")
+    try:
+        # Line feeds only: the script hash in the CSP is computed on this exact text.
+        temporary_path.write_bytes(page.encode("utf-8"))
+        os.replace(temporary_path, output_path)
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
 
 
 def _dashboard_page(jobs: list[Job], fx_rate: FxRate) -> str:
     page = _fill_template(_template_replacements(jobs, fx_rate))
     if not jobs:
-        return _show_empty_state(page)
-    return page
+        page = _show_empty_state(page)
+    return page.replace("__CSP__", _content_security_policy(page))
+
+
+_INLINE_SCRIPT = re.compile(r"<script>(.*?)</script>", re.DOTALL)
+
+
+def _content_security_policy(page: str) -> str:
+    """Only the page's own script may run: it is allowed by its hash, not by 'unsafe-inline'.
+
+    Even if text from a portal ever slipped into the page unescaped, a script it added
+    would not match the hash and the browser would refuse to run it.
+    """
+    hashes = " ".join(_script_hash(match.group(1)) for match in _INLINE_SCRIPT.finditer(page))
+    if not hashes:
+        hashes = "'none'"
+    return ("default-src 'none'; style-src 'unsafe-inline'; script-src " + hashes +
+            "; img-src data:; base-uri 'none'; form-action 'none'")
+
+
+def _script_hash(script_text: str) -> str:
+    digest = hashlib.sha256(script_text.encode("utf-8")).digest()
+    return "'sha256-" + base64.b64encode(digest).decode("ascii") + "'"
 
 
 def _template_replacements(jobs: list[Job], fx_rate: FxRate) -> dict[str, str]:

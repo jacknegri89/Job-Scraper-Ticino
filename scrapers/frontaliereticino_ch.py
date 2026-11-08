@@ -17,6 +17,7 @@ from job_filter import categorize_job
 _INDEX_URL = "https://cdn.frontaliereticino.ch/data/jobs-it-index.json"
 _JOB_BASE  = "https://frontaliereticino.ch/cerca-lavoro-ticino/"
 _HEADERS   = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+_MAX_INDEX_BYTES = 20 * 1024 * 1024
 
 
 def _parse_date(raw: str) -> str:
@@ -52,7 +53,13 @@ def _download_index() -> list[dict[str, str]]:
 def _read_index_response() -> list[dict[str, str]]:
     request = urllib.request.Request(_INDEX_URL, headers=_HEADERS)
     with urllib.request.urlopen(request, timeout=30) as response:
-        return json.loads(response.read().decode("utf-8"))
+        body = response.read(_MAX_INDEX_BYTES + 1)
+    if len(body) > _MAX_INDEX_BYTES:
+        raise ValueError("the job index is larger than expected; it was not read")
+    index = json.loads(body.decode("utf-8"))
+    if not isinstance(index, list):
+        raise ValueError("the job index has an unexpected format")
+    return index
 
 
 def _job_from_item(item: dict[str, str]) -> dict[str, str] | None:

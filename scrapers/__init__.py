@@ -1,3 +1,4 @@
+import os
 import re
 import random
 import time
@@ -413,12 +414,20 @@ def _close_page(page: Page | None) -> None:
 
 def save_session(context: BrowserContext) -> None:
     """Persist cookies and storage state for the next run."""
-    PROFILE_DIR.mkdir(exist_ok=True)
+    PROFILE_DIR.mkdir(mode=0o700, exist_ok=True)
     try:
         context.storage_state(path=str(SESSION_FILE))
+        _make_owner_only(SESSION_FILE)
         print("[OK] Session saved.")
     except Exception as e:
         print(f"[WARN] Could not save session: {e}")
+
+
+def _make_owner_only(path: Path) -> None:
+    """Cookies are credentials: on Linux and macOS only the owner may read the file."""
+    if os.name == "nt":
+        return
+    path.chmod(0o600)
 
 
 def retry(max_attempts: int | None = None) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:

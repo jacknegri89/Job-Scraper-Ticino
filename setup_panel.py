@@ -30,6 +30,15 @@ MAX_REQUESTS_PER_MINUTE = 30
 MAX_PLACE_QUERY_LENGTH = 80
 
 
+def content_security_policy(script_nonce=None):
+    """The panel script runs only with this response's one-time nonce; JSON replies run no script."""
+    script_source = "'none'"
+    if script_nonce:
+        script_source = f"'nonce-{script_nonce}'"
+    return ("default-src 'none'; style-src 'unsafe-inline'; script-src " + script_source +
+            "; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+
+
 def status_for_exit_code(exit_code):
     """Panel wording for the exit code of a finished search (see exit_codes.py)."""
     if exit_code == EXIT_SUCCESS:
@@ -103,7 +112,7 @@ class PanelHandler(BaseHTTPRequestHandler):
     def log_message(self, format_string, *args):
         pass
 
-    def _headers(self, status, content_type):
+    def _headers(self, status, content_type, script_nonce=None):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
@@ -111,7 +120,7 @@ class PanelHandler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+        self.send_header("Content-Security-Policy", content_security_policy(script_nonce))
         self.end_headers()
 
     def _send_json(self, status, payload):
@@ -145,8 +154,10 @@ class PanelHandler(BaseHTTPRequestHandler):
                 "categories": list(ALL_CATEGORIES), "seniority_levels": list(SENIORITY_LEVELS),
                 "contract_types": list(CONTRACT_TYPES)}
         encoded_data = json.dumps(data, ensure_ascii=True).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+        nonce = secrets.token_urlsafe(16)
         html = PANEL_FILE.read_text(encoding="utf-8").replace("__PANEL_DATA__", encoded_data)
-        self._headers(200, "text/html; charset=utf-8")
+        html = html.replace("<script>", f'<script nonce="{nonce}">')
+        self._headers(200, "text/html; charset=utf-8", script_nonce=nonce)
         self.wfile.write(html.encode("utf-8"))
 
     def _read_body(self):

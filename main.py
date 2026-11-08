@@ -34,6 +34,7 @@ from scrapers import check_listing, create_browser_context, fetch_description, l
 from scrapers import settings as config
 from scrapers.adecco_ch import scrape_adecco_ch
 from scrapers.carriera_ch import scrape_carriera_ch
+from scrapers.frontaliereticino_ch import _download_index as download_frontaliereticino_index
 from scrapers.frontaliereticino_ch import scrape_frontaliereticino_ch
 from scrapers.gigroup_ch import scrape_gigroup_ch
 from scrapers.indeed_ch import scrape_indeed_ch
@@ -249,14 +250,7 @@ def _probe_frontaliereticino(started_at: float) -> None:
 
 
 def _load_frontaliereticino_count() -> int:
-    import urllib.request
-
-    request = urllib.request.Request(
-        "https://cdn.frontaliereticino.ch/data/jobs-it-index.json",
-        headers={"User-Agent": "Mozilla/5.0"},
-    )
-    with urllib.request.urlopen(request, timeout=20) as response:
-        return len(json.loads(response.read().decode("utf-8")))
+    return len(download_frontaliereticino_index())
 
 
 def _probe_check_selector(page: Any, site: str, ready_selector: str, started_at: float) -> None:
