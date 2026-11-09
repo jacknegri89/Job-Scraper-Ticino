@@ -16,6 +16,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - Settings version 2 with an automatic migration and a one-time `.v1.bak` backup; atomic cache writes with backups.
 - The panel can look a town up for the starting point and choose every new option.
 
+- A *Translate to Italian* button on listings written in English, German or French. It uses the browser's own translator and sends nothing; when the browser cannot translate, or the translation fails or times out, the text is left unchanged and a separate *Send the text to Google Translate* button appears. Long texts are shortened with *Show full text*.
 - Exit codes a scheduler can trust: `0` success, `1` failure, `2` partial, `3` another search is running. The panel shows the same outcome.
 - One search at a time per folder (a lock file, with recovery of locks left by a crash), also across the panel, the command line and scheduled tasks.
 - `--ai` to ask for the AI rating on the command line, and a setting for the most listings rated per search (25 by default).
@@ -25,6 +26,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - `requirements-dev.txt`, pinned dependencies, Dependabot, a Windows test job, a dependency audit job and the security rules of bandit in the lint step.
 
 ### Changed
+- The dashboard is redesigned for reading: system fonts at 16 px, sentence-case labels, plain cards, one green for actions, no decoration. Descriptions are shown in paragraphs instead of one block.
+- Stored descriptions can be up to 6,000 characters and are cut at a whole line.
 - The project is now called JobScraper (it was Job Scraper Ticino). The old GitHub address redirects to the new one.
 - The cross-border estimate treated 0.96 as EUR per CHF, about 12% below the ECB rate, and used the 2025 second IRPEF bracket and a wrong deduction formula for the 28,000-50,000 EUR band. All three are fixed.
 - Italian portals are no longer rejected by the filter. Listings are placed by their location, not by a fixed list of eight municipalities (settings from earlier versions keep exactly that behaviour).
@@ -48,6 +51,9 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - Removed four unused functions.
 
 ### Fixed
+- Login walls, buttons and cookie notices (LinkedIn's sign-in form above all) were stored and shown as the listing text. The text is now read from the listing's own part of the page and cleaned; text that still carries a sign-in form is dropped and read again.
+- Seniority, contract type and remote work were guessed from that page furniture (for example "Internship"); they now come from the listing text only.
+- Categories: fashion and product developers, sales roles ("Venditore IA") and real-estate developers were counted as software jobs; PLC and HMI programming is now "Electronics & machining".
 - AI results were reused after the candidate profile changed.
 - A page that was an anti-bot message could be stored as a job description.
 - A salary written as "28.000 € - 32.000 € all'anno" was read as a single amount.
