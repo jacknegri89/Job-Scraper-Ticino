@@ -161,3 +161,40 @@ def test_no_place_or_distance_is_invented_for_a_remote_description() -> None:
     job = normalize_job(_raw(city="", description="Posizione 100% remoto."))
     assert job["place_name"] == ""
     assert job["location_certainty"] == "unknown"
+
+
+# ---- an ambiguous category is settled by the description, and is not used to drop the job before that
+
+def _customer_service_raw(**extra: object) -> dict:
+    raw = _raw(title="Operatori Customer Service / Help Desk", **extra)
+    return raw
+
+
+def test_a_job_that_may_be_it_support_is_not_dropped_on_category_before_its_description(monkeypatch) -> None:
+    preferences = SearchPreferences(categories=frozenset({"tech"}))
+
+    first_look = process_jobs([_customer_service_raw()], preferences)
+
+    assert len(first_look.jobs) == 1
+
+
+def test_the_same_job_is_dropped_once_the_description_shows_a_call_centre_role() -> None:
+    preferences = SearchPreferences(categories=frozenset({"tech"}))
+    call_centre = ("Gestione delle chiamate in entrata dei clienti, informazioni sui servizi e registrazione delle "
+                   "richieste. Orario su turni, contratto a tempo determinato.")
+
+    result = process_jobs([_customer_service_raw(description=call_centre)], preferences)
+
+    assert result.jobs == []
+    assert result.stats["jobs.ch"].excluded["category"] == 1
+
+
+def test_refreshing_from_the_description_moves_the_category_both_ways() -> None:
+    job = normalize_job(_customer_service_raw())
+    assert job["category"] == "other"
+
+    job["description"] = ("Supporto informatico di primo livello agli utenti: ticketing, Windows, Microsoft 365, "
+                          "troubleshooting su hardware e VPN.")
+    refresh_from_description(job)
+
+    assert job["category"] == "tech"

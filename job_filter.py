@@ -64,6 +64,7 @@ KEYWORDS = {
     ],
     # Electronics, electrical and machining roles that used to sit under "tech".
     CATEGORY_TECHNICAL: [
+        "Programmatore PLC", "Sviluppatore PLC", "Tecnico PLC",
         "Operaio elettronico", "Cablatore", "Cablaggio",
         "Tecnico elettronico", "Assemblatore elettronico",
         "Montatore elettronico", "Tecnico di laboratorio",
@@ -155,8 +156,14 @@ _CATEGORY_PATTERNS = {
 _CATEGORY_PATTERNS["tech"].append(re.compile(r"(?<!\w)ai(?!\w)"))
 
 
-# "Business Developer" and similar are sales roles, not software roles.
-_NOT_SOFTWARE = re.compile(r"business develop|sviluppo commerciale|sviluppatore commerciale|sviluppo business")
+# "Business Developer", "Product Developer" (fashion), "Venditore IA" and similar are sales,
+# product or fashion roles that only share a word with software jobs.
+_NOT_SOFTWARE = re.compile(
+    r"business develop|sviluppo commerciale|sviluppatore commerciale|sviluppo business"
+    r"|product develop|sviluppo prodotto|apparel|swimwear|nightwear|footwear|knitwear|textile|tessil|abbigliamento"
+    r"|real estate|property develop|immobiliar"
+    r"|venditor|vendita|sales|account manager|recruiter|talent acquisition"
+)
 
 
 # Machining and electrical titles are checked before software ones: "Programmatore CNC"
@@ -164,8 +171,47 @@ _NOT_SOFTWARE = re.compile(r"business develop|sviluppo commerciale|sviluppatore 
 _CATEGORY_ORDER = (CATEGORY_TECHNICAL, *(name for name in KEYWORDS if name != CATEGORY_TECHNICAL))
 
 
-def categorize_job(title: str) -> str:
-    """Assign a broad category from the job title."""
+# "Help Desk" next to "Customer Service" is usually a call-centre role, not IT support.
+_CUSTOMER_SERVICE = re.compile(
+    r"customer service|customer care|customer support|call cent|contact cent|servizio clienti|assistenza clienti"
+)
+
+# Words that, together, show that a "help desk" listing is about computers and not about customers.
+_IT_SUPPORT_MARKERS = (
+    "it support", "supporto it", "supporto informatico", "assistenza informatica", "assistenza tecnica informatica",
+    "help desk it", "helpdesk it", "service desk it", "ticketing", "active directory", "windows", "linux",
+    "sistemi operativi", "hardware", "troubleshooting", "microsoft 365", "office 365", "vpn",
+    "incident management", "itil",
+)
+MIN_IT_SUPPORT_MARKERS = 2
+
+
+def categorize_job(title: str, description: str = "") -> str:
+    """Assign a broad category from the job title, and from the description when the title is ambiguous."""
+    category = _category_from_title(title)
+    if category == CATEGORY_TECH and _is_customer_service_title(title) and not _confirms_it_support(description):
+        return CATEGORY_OTHER
+    return category
+
+
+def category_awaits_description(title: str, description: str = "") -> bool:
+    """True while the category could still change once the description is known."""
+    if description:
+        return False
+    return _category_from_title(title) == CATEGORY_TECH and _is_customer_service_title(title)
+
+
+def _is_customer_service_title(title: str) -> bool:
+    return bool(_CUSTOMER_SERVICE.search((title or "").lower()))
+
+
+def _confirms_it_support(description: str) -> bool:
+    lowered = (description or "").lower()
+    found = {marker for marker in _IT_SUPPORT_MARKERS if _keyword_pattern(marker).search(lowered)}
+    return len(found) >= MIN_IT_SUPPORT_MARKERS
+
+
+def _category_from_title(title: str) -> str:
     title_lower = (title or "").lower()
     for category in _CATEGORY_ORDER:
         if category == CATEGORY_TECH and _NOT_SOFTWARE.search(title_lower):

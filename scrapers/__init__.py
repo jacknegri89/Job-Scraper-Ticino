@@ -10,6 +10,10 @@ from urllib.parse import urljoin, urlsplit
 
 from playwright.sync_api import Browser, BrowserContext, ElementHandle, Page, Playwright
 
+from description_text import LINE_SEPARATOR, clean_description, shorten
+
+# A stored description is cut here; the dashboard shows it whole so it can be read and translated.
+MAX_DESCRIPTION_CHARS = 6000
 _EMAIL_RE    = re.compile(r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,10}\b')
 # System addresses to ignore: noreply senders, ATS systems, and job portals.
 _EMAIL_NOISE = (
@@ -233,7 +237,7 @@ def dismiss_cookie_dialog(page: Page, site: str = "") -> str | None:
     return dismiss_cookies(page, site)
 
 
-def fetch_description(context: BrowserContext, url: str, max_chars: int = 3000) -> dict[str, str]:
+def fetch_description(context: BrowserContext, url: str, max_chars: int = MAX_DESCRIPTION_CHARS) -> dict[str, str]:
     """Open a job page and return its cleaned description plus any email."""
     empty = {"description": "", "email": ""}
     if not _valid_description_url(url):
@@ -382,6 +386,9 @@ def _open_description_page(context: BrowserContext, url: str) -> Page:
 
 def _description_selectors() -> list[str]:
     return [
+        # LinkedIn's public page: the listing text only, without the login wall around it.
+        ".show-more-less-html__markup",
+        ".description__text",
         "[data-cy='job-description']",
         "#jobDescriptionText",
         ".jobsearch-jobDescriptionText",
@@ -409,13 +416,14 @@ def _selector_text(page: Page, selector: str) -> str:
 
 
 def _clean_description_text(description_text: str) -> str:
+    """Keep the listing text only: no login walls, buttons or cookie notices (see description_text.py)."""
     lines = [line.strip() for line in description_text.splitlines() if line.strip()]
-    return " | ".join(lines)
+    return clean_description(LINE_SEPARATOR.join(lines))
 
 
 def _description_result(clean_text: str, max_chars: int) -> dict[str, str]:
     # Extract email from the full text before truncating the description.
-    return {"description": clean_text[:max_chars], "email": extract_email(clean_text)}
+    return {"description": shorten(clean_text, max_chars), "email": extract_email(clean_text)}
 
 
 def detect_block_reason(page: Page) -> str | None:

@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 import geo
 from job_dedup import deduplicate
 from job_classifier import CONTRACT_UNKNOWN, SENIORITY_UNKNOWN
-from job_filter import is_safe_job_url
+from job_filter import category_awaits_description, is_safe_job_url
 from job_model import normalize_job
 from preferences import SearchPreferences
 
@@ -67,13 +67,22 @@ def _location_of(job: dict) -> geo.Location:
 
 
 def _preference_reason(job: dict, preferences: SearchPreferences, final: bool) -> str:
-    if preferences.categories is not None and job.get("category") not in preferences.categories:
+    if _category_rejected(job, preferences, final):
         return REASON_CATEGORY
     if _is_rejected(job.get("seniority"), preferences.seniority_levels, SENIORITY_UNKNOWN, final):
         return REASON_SENIORITY
     if _is_rejected(job.get("contract_type"), preferences.contract_types, CONTRACT_UNKNOWN, final):
         return REASON_CONTRACT
     return ""
+
+
+def _category_rejected(job: dict, preferences: SearchPreferences, final: bool) -> bool:
+    """A category that the description may still change is not used to drop a job early."""
+    if preferences.categories is None or job.get("category") in preferences.categories:
+        return False
+    if not final and category_awaits_description(str(job.get("title") or ""), str(job.get("description") or "")):
+        return False
+    return True
 
 
 def _is_rejected(value: object, wanted: tuple | frozenset | list | None, unknown_value: str, final: bool) -> bool:
