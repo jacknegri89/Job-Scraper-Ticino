@@ -28,8 +28,12 @@ from preferences import SearchPreferences
 # "empty" (no proof that the page was understood) never prove that a job has gone.
 SOURCE_FULLY_SCANNED = ("ok", "no_results")
 
+# How many times the listing page gave no description, and when it was last tried (see main.py).
+DESCRIPTION_ATTEMPTS_FIELD = "description_attempts"
+DESCRIPTION_LAST_ATTEMPT_FIELD = "description_last_attempt"
+
 # Fields filled in later (descriptions, AI, salary text) that must survive a rescan.
-CARRIED_FIELDS = ("description", "email", "salary_text")
+CARRIED_FIELDS = ("description", "email", "salary_text", DESCRIPTION_ATTEMPTS_FIELD, DESCRIPTION_LAST_ATTEMPT_FIELD)
 CARRIED_PREFIXES = ("ai_",)
 CARRIED_LEGACY_FIELDS = ("estimated_gross_salary_chf",)
 
@@ -42,12 +46,25 @@ def merge_scan(
     source_outcomes: dict[str, str],
     preferences: SearchPreferences,
     now: datetime,
+    seen_but_hidden: list[dict] | None = None,
 ) -> tuple[list[dict], dict[str, int]]:
-    """Combine the cache with a new scan. Returns (jobs, counts by status)."""
+    """Combine the cache with a new scan. Returns (jobs, counts by status).
+
+    current_jobs     listings of this scan that the user wants: they enter the cache.
+    seen_but_hidden  listings of this scan that the current filters hide. A new one is not
+                     stored, but a cached one among them was seen on its portal, so it is
+                     refreshed like any other sighting. The filters decide what is shown,
+                     never whether a listing is still online.
+    """
     now_text = now.replace(microsecond=0).isoformat()
     previous_by_url = _index_by_url(previous_jobs)
     matched_ids: set[int] = set()
-    merged_jobs = [_mark_seen(job, previous_by_url, matched_ids, now_text) for job in current_jobs]
+    merged_jobs = [_mark_seen(job, previous_by_url, matched_ids, now_text, source_outcomes) for job in current_jobs]
+    for hidden_job in seen_but_hidden or []:
+        cached_copy = _find_previous(hidden_job, previous_by_url)
+        # One sighting is enough: a cached job already refreshed in this scan is left alone.
+        if cached_copy is not None and id(cached_copy) not in matched_ids:
+            merged_jobs.append(_mark_seen(hidden_job, previous_by_url, matched_ids, now_text, source_outcomes))
     for previous_job in previous_jobs:
         if id(previous_job) in matched_ids:
             continue
@@ -75,12 +92,14 @@ def _references(job: dict) -> list[dict]:
     return []
 
 
-def _mark_seen(job: dict, previous_by_url: dict, matched_ids: set[int], now_text: str) -> dict:
+def _mark_seen(job: dict, previous_by_url: dict, matched_ids: set[int], now_text: str,
+               source_outcomes: dict[str, str]) -> dict:
     previous_job = _find_previous(job, previous_by_url)
     first_seen = now_text
     if previous_job is not None:
         matched_ids.add(id(previous_job))
         _carry_over(previous_job, job)
+        _keep_links_on_unread_portals(previous_job, job, source_outcomes)
         first_seen = previous_job.get("first_seen") or now_text
     job["first_seen"] = first_seen
     job["last_seen"] = now_text
@@ -106,6 +125,24 @@ def _carry_over(previous_job: dict, job: dict) -> None:
     for field_name, value in previous_job.items():
         if field_name.startswith(CARRIED_PREFIXES) or field_name in CARRIED_LEGACY_FIELDS:
             job.setdefault(field_name, value)
+
+
+def _keep_links_on_unread_portals(previous_job: dict, job: dict, source_outcomes: dict[str, str]) -> None:
+    """Keep the link to the same job on a portal that this scan did not read to the end.
+
+    The fresh sighting only knows the portal it came from. A link on a portal that was blocked
+    or not scanned may still be good, so it stays; one on a portal that was read completely and
+    no longer lists the job is dropped.
+    """
+    references = _references(job)
+    known_urls = {normalize_url(reference["url"]) for reference in references}
+    for reference in _references(previous_job):
+        if normalize_url(reference["url"]) in known_urls:
+            continue
+        if source_outcomes.get(reference.get("source", "")) in SOURCE_FULLY_SCANNED:
+            continue
+        references.append(dict(reference))
+    job["sources"] = references
 
 
 def _age_unmatched_job(

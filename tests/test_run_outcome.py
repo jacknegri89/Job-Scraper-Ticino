@@ -21,6 +21,9 @@ from scrapers.site_report import RunReport
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 
+LISTING_TEXT = "Sviluppo di servizi in Python per i clienti dell'azienda, in un piccolo team di prodotto."
+
+
 def _raw(url: str = "https://example.ch/1", title: str = "Sviluppatore Python", **extra: object) -> dict:
     base = {"title": title, "company": "ACME SA", "city": "Chiasso", "date": "2026-11-05", "url": url,
             "source": "jobs.ch"}
@@ -182,8 +185,8 @@ def test_the_ai_only_rates_visible_jobs_that_are_not_expired(monkeypatch, tmp_pa
         return jobs
 
     monkeypatch.setattr(main, "analyze_jobs", fake_analyze)
-    visible = normalize_job(_raw("https://example.ch/1", "Visible"))
-    expired = normalize_job(_raw("https://example.ch/2", "Expired"))
+    visible = normalize_job(_raw("https://example.ch/1", "Visible", description=LISTING_TEXT))
+    expired = normalize_job(_raw("https://example.ch/2", "Expired", description=LISTING_TEXT))
     expired["status"] = "possibly_expired"
     hidden = normalize_job(_raw("https://example.ch/3", "Hidden", city="Roma"))
 
@@ -316,7 +319,13 @@ def test_a_large_log_is_rotated_and_a_small_one_is_left_alone(tmp_path) -> None:
 
 def test_listings_whose_description_waits_for_the_next_run_are_not_rated_yet(monkeypatch) -> None:
     monkeypatch.setattr(main, "MAX_DESCRIPTIONS_PER_RUN", 2)
-    monkeypatch.setattr(main, "_download_description_batch", lambda *_args: None)
+    monkeypatch.setattr(main, "_PREFERENCES", main.SearchPreferences())
+    monkeypatch.setattr(main, "_ACTIVE_SOURCES", None)
+
+    def fake_fetch(_context, _url):
+        return {"description": LISTING_TEXT, "email": ""}
+
+    monkeypatch.setattr(main, "fetch_description", fake_fetch)
     jobs = [normalize_job(_raw(f"https://example.ch/{number}", f"Job {number}")) for number in range(1, 5)]
     jobs[0][main.DESCRIPTION_DEFERRED] = True  # left over from an earlier run: cleared first
 
@@ -330,3 +339,17 @@ def test_listings_whose_description_waits_for_the_next_run_are_not_rated_yet(mon
 def test_a_job_that_already_has_its_description_is_rated(monkeypatch) -> None:
     job = normalize_job(_raw(description="A long description of the work and the team."))
     assert main._jobs_worth_analyzing([job]) == [job]
+
+
+def test_a_listing_whose_page_failed_is_rated_only_when_no_new_attempt_is_due(monkeypatch) -> None:
+    """Its text may arrive on the next run: rating the title now would be paid again then."""
+    failed_once = normalize_job(_raw("https://example.ch/1", "Failed once"))
+    failed_once["description_attempts"] = 1
+    gave_up = normalize_job(_raw("https://example.ch/2", "Gave up"))
+    gave_up["description_attempts"] = main.MAX_DESCRIPTION_ATTEMPTS
+    source_blocked = normalize_job(_raw("https://example.ch/3", "Source blocked"))
+    source_blocked["status"] = "cached_source_unavailable"
+
+    worth = main._jobs_worth_analyzing([failed_once, gave_up, source_blocked])
+
+    assert [job["title"] for job in worth] == ["Gave up", "Source blocked"]

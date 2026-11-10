@@ -54,6 +54,22 @@ def test_the_full_list_keeps_the_job_in_the_cache_but_hides_it(monkeypatch) -> N
     assert len(kept) == 2
 
 
+def test_the_dashboard_does_not_hide_a_listing_for_a_level_its_unread_text_could_not_state(monkeypatch) -> None:
+    """Seen on a real cache: 276 of 327 listings were hidden only because their text was still to be read."""
+    monkeypatch.setattr(main, "_PREFERENCES", SearchPreferences(seniority_levels=frozenset({"junior", "mid"}),
+                                                                contract_types=frozenset({"permanent"})))
+    monkeypatch.setattr(main, "_ACTIVE_SOURCES", None)
+    text_not_read_yet = normalize_job(_raw(url="https://example.ch/unread"))
+    text_says_nothing = normalize_job(_raw(url="https://example.ch/silent",
+                                           description="Sviluppo di servizi web per i clienti dell'azienda."))
+    text_says_senior = normalize_job(_raw(url="https://example.ch/senior",
+                                          description="Almeno 7 anni di esperienza richiesti."))
+
+    visible = main._visible_jobs([text_not_read_yet, text_says_nothing, text_says_senior])
+
+    assert [job["url"] for job in visible] == ["https://example.ch/unread"]
+
+
 def test_an_unknown_seniority_is_not_discarded_before_the_description_is_downloaded() -> None:
     preferences = SearchPreferences(seniority_levels=frozenset({"junior", "mid"}))
 
