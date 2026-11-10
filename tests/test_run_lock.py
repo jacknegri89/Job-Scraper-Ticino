@@ -202,3 +202,66 @@ def test_two_real_processes_cannot_hold_the_lock_together(tmp_path) -> None:
     assert is_running(lock) is False
     with exclusive_run(lock):
         pass
+
+
+# ---- two processes that find the same abandoned lock
+
+PROJECT_FOLDER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HOLD_SECONDS = 2.0
+# A scan that tries to take the lock and says what happened. The pause after "this lock is
+# abandoned" stands for an unlucky moment: it is where a second process used to slip in.
+RACER_SCRIPT = (
+    "import sys, time, pathlib, run_lock" + chr(10)
+    + "lock = pathlib.Path(sys.argv[1])" + chr(10)
+    + "pause_seconds = float(sys.argv[2])" + chr(10)
+    + "hold_seconds = float(sys.argv[3])" + chr(10)
+    + "check_lock = run_lock._is_stale" + chr(10)
+    + "def slow_check(path):" + chr(10)
+    + "    abandoned = check_lock(path)" + chr(10)
+    + "    if abandoned:" + chr(10)
+    + "        time.sleep(pause_seconds)" + chr(10)
+    + "    return abandoned" + chr(10)
+    + "run_lock._is_stale = slow_check" + chr(10)
+    + "try:" + chr(10)
+    + "    with run_lock.exclusive_run(lock):" + chr(10)
+    + "        print('held', flush=True)" + chr(10)
+    + "        time.sleep(hold_seconds)" + chr(10)
+    + "except run_lock.AlreadyRunningError:" + chr(10)
+    + "    print('busy', flush=True)" + chr(10)
+)
+
+
+def _start_racer(lock, pause_seconds: float) -> subprocess.Popen:
+    command = [sys.executable, "-c", RACER_SCRIPT, str(lock), str(pause_seconds), str(HOLD_SECONDS)]
+    return subprocess.Popen(command, stdout=subprocess.PIPE, text=True, cwd=PROJECT_FOLDER)
+
+
+def _answers(racers: list[subprocess.Popen]) -> list[str]:
+    answers = []
+    for racer in racers:
+        output, _errors = racer.communicate(timeout=60)
+        answers.append(output.strip())
+    return answers
+
+
+def test_two_processes_that_find_the_same_abandoned_lock_cannot_both_take_it(tmp_path) -> None:
+    """The second one decided "abandoned" before the first one replaced the lock, and acts after it."""
+    lock = tmp_path / ".jobscraper.lock"
+    _write_lock(lock, DEAD_PID, time.time())
+
+    first = _start_racer(lock, pause_seconds=1.0)
+    time.sleep(0.4)
+    second = _start_racer(lock, pause_seconds=1.0)
+
+    assert sorted(_answers([first, second])) == ["busy", "held"]
+
+
+def test_many_processes_started_together_on_an_abandoned_lock_give_one_winner(tmp_path) -> None:
+    lock = tmp_path / ".jobscraper.lock"
+    _write_lock(lock, DEAD_PID, time.time())
+
+    racers = [_start_racer(lock, pause_seconds=0.05) for _number in range(6)]
+
+    answers = _answers(racers)
+    assert answers.count("held") == 1, answers
+    assert answers.count("busy") == 5, answers

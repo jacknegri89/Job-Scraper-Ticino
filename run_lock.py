@@ -13,6 +13,9 @@ The age of a lock never frees it: a scan that is still running keeps its lock fo
 as it runs, also after a night with the computer asleep. When the system cannot say when
 a process started, a living process keeps the lock: two scans at once would damage the
 files, while a lock nobody owns only needs its file deleted.
+
+Two scans that find the same abandoned lock at the same moment cannot both take it: the
+replacement happens under a guard held by the operating system (see _takeover_guard).
 """
 
 import json
@@ -23,10 +26,18 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import BinaryIO
 
 LOCK_FILE_NAME = ".jobscraper.lock"
+# The takeover guard lives in this file next to the lock (see _takeover_guard).
+GUARD_FILE_SUFFIX = ".guard"
 # A lock that is still being written by the process that just created it is not stale.
 _UNREADABLE_GRACE_SECONDS = 10
+# Replacing an abandoned lock takes milliseconds; a guard that is still busy after this
+# long means another scan is starting, so this one gives up instead of waiting for ever.
+_GUARD_WAIT_SECONDS = 30
+_GUARD_POLL_SECONDS = 0.05
+_GUARD_LOCKED_BYTES = 1
 
 _WINDOWS_QUERY_LIMITED = 0x1000
 _WINDOWS_STILL_ACTIVE = 259
@@ -61,17 +72,92 @@ def is_running(lock_path: Path) -> bool:
 
 
 def _acquire(lock_path: Path) -> None:
-    for _attempt in range(2):
-        try:
-            descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            if not _is_stale(lock_path):
-                raise AlreadyRunningError(_busy_message(lock_path)) from None
-            _remove_quietly(lock_path)
-            continue
-        _write_owner(descriptor)
+    if _create_lock(lock_path):
         return
-    raise AlreadyRunningError(_busy_message(lock_path))
+    if not _is_stale(lock_path):
+        raise AlreadyRunningError(_busy_message(lock_path))
+    # The lock was left by a crash. Two scans may notice that at the same moment, so only
+    # the one holding the takeover guard may replace it.
+    with _takeover_guard(lock_path):
+        took_over = _replace_abandoned_lock(lock_path)
+    if not took_over:
+        raise AlreadyRunningError(_busy_message(lock_path))
+
+
+def _create_lock(lock_path: Path) -> bool:
+    """Create the lock file if nobody has one. The operating system lets only one creator win."""
+    try:
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    _write_owner(descriptor)
+    return True
+
+
+def _replace_abandoned_lock(lock_path: Path) -> bool:
+    """Run under the takeover guard: check again, remove and create with no other taker in between.
+
+    The check is repeated because another scan may have replaced the lock while this one
+    waited for the guard; that lock belongs to a living scan and must stay.
+    """
+    if not _is_stale(lock_path):
+        return False
+    _remove_quietly(lock_path)
+    return _create_lock(lock_path)
+
+
+@contextmanager
+def _takeover_guard(lock_path: Path) -> Iterator[None]:
+    """Let one process at a time replace an abandoned lock.
+
+    The guard is a lock of the operating system on a small file next to the lock. The system
+    drops it by itself when its process ends, also after a crash, so the guard itself can never
+    be left behind. Its file is kept: deleting it would let two processes guard different files.
+    """
+    guard_path = lock_path.with_name(lock_path.name + GUARD_FILE_SUFFIX)
+    with open(guard_path, "a+b") as guard_file:
+        _lock_file_when_free(guard_file, lock_path)
+        try:
+            yield
+        finally:
+            _unlock_file(guard_file)
+
+
+def _lock_file_when_free(guard_file: BinaryIO, lock_path: Path) -> None:
+    deadline = time.monotonic() + _GUARD_WAIT_SECONDS
+    while not _try_lock_file(guard_file):
+        if time.monotonic() >= deadline:
+            raise AlreadyRunningError(_busy_message(lock_path))
+        time.sleep(_GUARD_POLL_SECONDS)
+
+
+def _try_lock_file(guard_file: BinaryIO) -> bool:
+    """Take the system lock on the file without waiting; False when another process has it."""
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            guard_file.seek(0)
+            msvcrt.locking(guard_file.fileno(), msvcrt.LK_NBLCK, _GUARD_LOCKED_BYTES)
+        else:
+            import fcntl
+
+            fcntl.flock(guard_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
+
+
+def _unlock_file(guard_file: BinaryIO) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        guard_file.seek(0)
+        msvcrt.locking(guard_file.fileno(), msvcrt.LK_UNLCK, _GUARD_LOCKED_BYTES)
+    else:
+        import fcntl
+
+        fcntl.flock(guard_file.fileno(), fcntl.LOCK_UN)
 
 
 def _write_owner(descriptor: int) -> None:

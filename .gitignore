@@ -245,5 +245,6 @@ scraper.log.old
 .planning/
 docs/superpowers/
 
-# Lock held while a scan is running
+# Lock held while a scan is running, and the guard used to replace an abandoned lock
 .jobscraper.lock
+.jobscraper.lock.guard
