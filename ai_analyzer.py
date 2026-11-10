@@ -59,7 +59,7 @@ _MAX_PROFILE_CHARS = 3000
 _MAX_DESCRIPTION_CHARS = 1500
 _MAX_REASON_CHARS = 120
 _MAX_SUMMARY_CHARS = 2000
-_CONTROL_CHARACTERS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f  ]")
+_CONTROL_CHARACTERS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f\u2028\u2029]")
 _GENERIC_CANDIDATE_PROFILE = (
     "Generic candidate profile. Evaluate job fit from the job posting and any "
     "candidate details supplied in user_config.py. Do not infer personal details "

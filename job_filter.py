@@ -162,7 +162,7 @@ _NOT_SOFTWARE = re.compile(
     r"business develop|sviluppo commerciale|sviluppatore commerciale|sviluppo business"
     r"|product develop|sviluppo prodotto|apparel|swimwear|nightwear|footwear|knitwear|textile|tessil|abbigliamento"
     r"|real estate|property develop|immobiliar"
-    r"|venditor|vendita|sales|account manager|recruiter|talent acquisition"
+    r"|venditor|vendita|(?<!\w)sales(?!\w)|account manager|recruiter|talent acquisition"
 )
 
 
