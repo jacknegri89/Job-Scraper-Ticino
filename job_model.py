@@ -14,6 +14,7 @@ Normalized fields added to each job:
 from copy import deepcopy
 
 import geo
+from description_text import clean_description
 from job_classifier import classify_contract, classify_seniority
 from job_filter import categorize_job, normalize_url, sort_date
 from work_mode import work_mode_of_job
@@ -57,7 +58,11 @@ def refresh_from_description(job: dict) -> None:
     whenever a description was downloaded or carried over from the cache.
     """
     title = str(job.get("title") or "")
-    description = str(job.get("description") or "")
+    # Text kept from older scans may still hold a login wall or buttons: clean it again (safe to repeat).
+    description = clean_description(str(job.get("description") or ""), title, str(job.get("company") or ""))
+    job["description"] = description
+    # An ambiguous title (a "help desk" that is really customer service) is settled by the description.
+    job["category"] = categorize_job(title, description)
     level, evidence = classify_seniority(title, description)
     job["seniority"] = level
     job["seniority_evidence"] = evidence

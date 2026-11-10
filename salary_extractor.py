@@ -25,7 +25,7 @@ PLAUSIBLE_RANGES = {
     PERIOD_HOUR: (7, 300),
 }
 
-_AMOUNT = r"\d{1,3}(?:[.'’  ]\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?\s?[kK]?"
+_AMOUNT = r"\d{1,3}(?:[.'’\xa0 ]\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?\s?[kK]?"
 _CURRENCY = r"CHF|SFr\.?|Fr\.|EUR|€|euro"
 _SALARY_PATTERN = re.compile(
     r"(?P<cur_before>" + _CURRENCY + r")?\s?"
@@ -157,7 +157,7 @@ def parse_amount(raw_amount: str) -> float | None:
     cleaned = raw_amount.strip().lower().replace("’", "'")
     multiplier = 1000 if cleaned.endswith("k") else 1
     cleaned = cleaned.rstrip("k").strip()
-    cleaned = re.sub(r"['  ]", "", cleaned)
+    cleaned = re.sub(r"['\xa0 ]", "", cleaned)
     cleaned = _normalize_separators(cleaned)
     try:
         return float(cleaned) * multiplier

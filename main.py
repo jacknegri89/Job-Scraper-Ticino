@@ -26,7 +26,13 @@ import setup_panel
 from ai_analyzer import AI_SUITABLE, analyze_jobs
 from dashboard_builder import generate_html
 from exit_codes import EXIT_BUSY, EXIT_FAILURE, EXIT_PARTIAL, EXIT_SUCCESS, exit_code_for_overall_status
-from job_lifecycle import apply_verification, jobs_to_verify, merge_scan
+from job_lifecycle import (
+    DESCRIPTION_ATTEMPTS_FIELD,
+    DESCRIPTION_LAST_ATTEMPT_FIELD,
+    apply_verification,
+    jobs_to_verify,
+    merge_scan,
+)
 from job_model import refresh_from_description
 from job_pipeline import PipelineResult, exclusion_reason, process_jobs
 from job_status import STATUS_ACTIVE, STATUS_GONE, STATUS_POSSIBLY_EXPIRED
@@ -53,8 +59,10 @@ LOCK_FILE = Path(run_lock.LOCK_FILE_NAME)
 
 # A listing page takes about 7 seconds to open; the rest are read on the next run.
 MAX_DESCRIPTIONS_PER_RUN = 60
-# Set on listings whose description waits for the next run; the AI does not rate them yet.
-DESCRIPTION_DEFERRED = "description_deferred"
+# A page that keeps giving no text (a login wall, a block) is opened on a few runs, then
+# only once every few days: the portal is not asked for the same failing page every day.
+MAX_DESCRIPTION_ATTEMPTS = 3
+DESCRIPTION_RETRY_DAYS = 7
 
 # Set by _apply_search_settings when a saved panel configuration is used.
 # The AI is paid and sends data to OpenAI, so it only runs when the user switched it on
@@ -243,17 +251,16 @@ def _print_scan_summary(result: PipelineResult) -> None:
 
 
 def _download_descriptions(context: Any, valid_jobs: list[dict]) -> None:
-    for job in valid_jobs:
-        job.pop(DESCRIPTION_DEFERRED, None)
-    jobs_to_download = [job for job in valid_jobs if _needs_description(job)]
+    now = datetime.now()
+    jobs_to_download = [job for job in valid_jobs
+                        if _needs_description(job) and _worth_a_description(job) and _may_try_description(job, now)]
     if not jobs_to_download:
         return
+    # Pages never opened come first; the sort is stable, so the newest stay first within each group.
+    jobs_to_download.sort(key=_failed_description_attempts)
     left_for_next_run = len(jobs_to_download) - MAX_DESCRIPTIONS_PER_RUN
     if left_for_next_run > 0:
         print(f"[DESC] Opening the {MAX_DESCRIPTIONS_PER_RUN} newest pages now; {left_for_next_run} more on the next run.")
-        # Their rating would change once the description arrives, so it waits for that run.
-        for job in jobs_to_download[MAX_DESCRIPTIONS_PER_RUN:]:
-            job[DESCRIPTION_DEFERRED] = True
     _download_description_batch(context, jobs_to_download[:MAX_DESCRIPTIONS_PER_RUN], len(valid_jobs))
 
 
@@ -263,6 +270,44 @@ def _needs_description(job: dict) -> bool:
     if description and not looks_like_block_page(description):
         return False
     return job.get("status") in (None, STATUS_ACTIVE)
+
+
+def _worth_a_description(job: dict) -> bool:
+    """A page is opened only for a listing the settings may still show.
+
+    Seniority and contract can be unknown before the text is read, so those two filters wait
+    (final=False); a listing hidden for any other reason is not opened.
+    """
+    if not _from_active_source(job):
+        return False
+    return not exclusion_reason(job, _PREFERENCES, final=False)
+
+
+def _failed_description_attempts(job: dict) -> int:
+    attempts = job.get(DESCRIPTION_ATTEMPTS_FIELD)
+    if isinstance(attempts, int) and not isinstance(attempts, bool) and attempts > 0:
+        return attempts
+    return 0
+
+
+def _may_try_description(job: dict, now: datetime) -> bool:
+    """After MAX_DESCRIPTION_ATTEMPTS failures the page rests for DESCRIPTION_RETRY_DAYS."""
+    if _failed_description_attempts(job) < MAX_DESCRIPTION_ATTEMPTS:
+        return True
+    try:
+        last_attempt = datetime.fromisoformat(str(job.get(DESCRIPTION_LAST_ATTEMPT_FIELD) or ""))
+    except ValueError:
+        return True
+    return (now - last_attempt).days >= DESCRIPTION_RETRY_DAYS
+
+
+def _record_description_attempt(job: dict, found_text: bool) -> None:
+    if found_text:
+        job.pop(DESCRIPTION_ATTEMPTS_FIELD, None)
+        job.pop(DESCRIPTION_LAST_ATTEMPT_FIELD, None)
+        return
+    job[DESCRIPTION_ATTEMPTS_FIELD] = _failed_description_attempts(job) + 1
+    job[DESCRIPTION_LAST_ATTEMPT_FIELD] = datetime.now().replace(microsecond=0).isoformat()
 
 
 def _download_description_batch(context: Any, jobs_to_download: list[dict], total_valid: int) -> None:
@@ -282,9 +327,11 @@ def _download_one_description(context: Any, job: dict, index: int, jobs_to_downl
     step_started_at = time.perf_counter()
     details = fetch_description(context, job.get("url", ""))
     job["description"] = details["description"]
-    job["email"] = details["email"]
+    # A page that failed this time must not erase an address found on an earlier visit.
+    job["email"] = details["email"] or job.get("email") or ""
     # The full text may settle what the title left open (seniority, contract, remote work).
     refresh_from_description(job)
+    _record_description_attempt(job, found_text=bool(job["description"]))
     step_times.append(time.perf_counter() - step_started_at)
     email_label = " [email]" if details["email"] else ""
     print(f"[DESC] {index + 1}/{len(jobs_to_download)} - {job.get('title', '')[:50]}"
@@ -310,6 +357,8 @@ def _collect_with_browser(playwright: Any, selected: list[ScraperEntry], scan_on
         browser, context = _scrape_selected_sites(playwright, browser, context, selected, raw_jobs)
         jobs = _build_job_list(raw_jobs, scan_only)
         if not scan_only:
+            # The last portal may have closed the browser: the description pages need a live one.
+            browser, context = _ensure_context_alive(playwright, browser, context)
             _download_descriptions(context, jobs)
             _verify_possibly_expired(context, jobs)
         return jobs, True
@@ -323,13 +372,18 @@ def _collect_with_browser(playwright: Any, selected: list[ScraperEntry], scan_on
 
 
 def _build_job_list(raw_jobs: list[dict], scan_only: bool) -> list[dict]:
-    """Filter the scan, then combine it with the cache so blocked portals lose nothing."""
+    """Filter the scan, then combine it with the cache so blocked portals lose nothing.
+
+    The cache also learns which of its jobs were seen again but are hidden by the current
+    filters: a filter must never make an online listing look expired.
+    """
     result = process_jobs(raw_jobs, _PREFERENCES)
     _print_scan_summary(result)
     if scan_only:
         return result.jobs
     outcomes = {site_result.site: site_result.status for site_result in run_report.results}
-    jobs, status_counts = merge_scan(_read_previous_jobs(), result.jobs, outcomes, _PREFERENCES, datetime.now())
+    jobs, status_counts = merge_scan(_read_previous_jobs(), result.jobs, outcomes, _PREFERENCES, datetime.now(),
+                                     seen_but_hidden=result.hidden_jobs)
     for job in jobs:
         if job.get("description"):
             refresh_from_description(job)
@@ -339,8 +393,12 @@ def _build_job_list(raw_jobs: list[dict], scan_only: bool) -> list[dict]:
 
 
 def _verify_possibly_expired(context: Any, jobs: list[dict]) -> None:
-    """Open a few possibly-expired listing pages to learn whether they are really gone."""
-    candidates = jobs_to_verify(jobs, _PREFERENCES.verify_limit)
+    """Open a few possibly-expired listing pages to learn whether they are really gone.
+
+    Only listings the dashboard shows are checked: the few page visits of a run are not
+    spent on jobs the user has filtered out.
+    """
+    candidates = jobs_to_verify(_visible_jobs(jobs), _PREFERENCES.verify_limit)
     if not candidates:
         return
     print(f"\n=== VERIFY ({len(candidates)} possibly expired listings) ===")
@@ -516,22 +574,33 @@ def _finalize_jobs(valid_jobs: list[dict], started_at: datetime, retry_unanalyza
 
 
 def _jobs_worth_analyzing(jobs: list[dict]) -> list[dict]:
-    """Do not pay to rate a listing that is probably gone, or one still waiting for its description.
+    """Do not pay to rate a listing that is probably gone, or one whose "text" is a block page.
 
-    The rating depends on the description, so rating before it arrives would be paid twice.
+    A listing with no description at all is handed over too, but never sent: ai_analyzer rates
+    a listing only from its text (see has_listing_text), however many downloads have failed.
     """
-    return [job for job in jobs
-            if job.get("status") not in (STATUS_POSSIBLY_EXPIRED, STATUS_GONE)
-            and not job.get(DESCRIPTION_DEFERRED)]
+    worth_analyzing = []
+    for job in jobs:
+        if job.get("status") in (STATUS_POSSIBLY_EXPIRED, STATUS_GONE):
+            continue
+        if looks_like_block_page(str(job.get("description") or "")):
+            continue
+        worth_analyzing.append(job)
+    return worth_analyzing
 
 
 def _visible_jobs(jobs: list[dict]) -> list[dict]:
-    """Jobs that match the current settings. Everything else stays in the cache untouched."""
+    """Jobs that match the current settings. Everything else stays in the cache untouched.
+
+    A level or contract that is "not stated" hides a listing only once its text has been
+    read: before that the listing never had the chance to state it (same rule as the scan).
+    """
     visible_jobs = []
     for job in jobs:
         if not _from_active_source(job):
             continue
-        if exclusion_reason(job, _PREFERENCES):
+        text_was_read = bool(job.get("description"))
+        if exclusion_reason(job, _PREFERENCES, final=text_was_read):
             continue
         visible_jobs.append(job)
     return visible_jobs

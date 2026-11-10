@@ -21,6 +21,9 @@ from scrapers.site_report import RunReport
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 
+LISTING_TEXT = "Sviluppo di servizi in Python per i clienti dell'azienda, in un piccolo team di prodotto."
+
+
 def _raw(url: str = "https://example.ch/1", title: str = "Sviluppatore Python", **extra: object) -> dict:
     base = {"title": title, "company": "ACME SA", "city": "Chiasso", "date": "2026-11-05", "url": url,
             "source": "jobs.ch"}
@@ -182,8 +185,8 @@ def test_the_ai_only_rates_visible_jobs_that_are_not_expired(monkeypatch, tmp_pa
         return jobs
 
     monkeypatch.setattr(main, "analyze_jobs", fake_analyze)
-    visible = normalize_job(_raw("https://example.ch/1", "Visible"))
-    expired = normalize_job(_raw("https://example.ch/2", "Expired"))
+    visible = normalize_job(_raw("https://example.ch/1", "Visible", description=LISTING_TEXT))
+    expired = normalize_job(_raw("https://example.ch/2", "Expired", description=LISTING_TEXT))
     expired["status"] = "possibly_expired"
     hidden = normalize_job(_raw("https://example.ch/3", "Hidden", city="Roma"))
 
@@ -209,7 +212,8 @@ def test_the_per_run_limit_sends_only_the_newest_listings(monkeypatch) -> None:
     monkeypatch.setattr(ai_analyzer, "_DELAY_BETWEEN_CALLS", 0)
     monkeypatch.setattr(ai_analyzer, "CANDIDATE_PROFILE_OVERRIDE", "Graduate with projects")
     monkeypatch.setattr(ai_analyzer, "_create_openai_client", lambda: client)
-    jobs = [normalize_job(_raw(f"https://example.ch/{number}", f"Job {number}", date=f"2026-11-0{number}"))
+    jobs = [normalize_job(_raw(f"https://example.ch/{number}", f"Job {number}", date=f"2026-11-0{number}",
+                               description=LISTING_TEXT))
             for number in range(1, 6)]
 
     ai_analyzer.analyze_jobs(jobs, max_jobs=2)
@@ -225,7 +229,8 @@ def test_without_a_limit_every_pending_job_is_rated(monkeypatch) -> None:
     monkeypatch.setattr(ai_analyzer, "_DELAY_BETWEEN_CALLS", 0)
     monkeypatch.setattr(ai_analyzer, "CANDIDATE_PROFILE_OVERRIDE", "Graduate with projects")
     monkeypatch.setattr(ai_analyzer, "_create_openai_client", lambda: client)
-    jobs = [normalize_job(_raw(f"https://example.ch/{number}", f"Job {number}")) for number in range(1, 4)]
+    jobs = [normalize_job(_raw(f"https://example.ch/{number}", f"Job {number}", description=LISTING_TEXT))
+            for number in range(1, 4)]
 
     ai_analyzer.analyze_jobs(jobs)
 
@@ -314,17 +319,21 @@ def test_a_large_log_is_rotated_and_a_small_one_is_left_alone(tmp_path) -> None:
     setup_panel.rotate_log_if_large(tmp_path / "missing.log", max_bytes=100)  # no log yet: nothing to do
 
 
-def test_listings_whose_description_waits_for_the_next_run_are_not_rated_yet(monkeypatch) -> None:
+def test_listings_whose_description_waits_for_the_next_run_cannot_be_rated_yet(monkeypatch) -> None:
     monkeypatch.setattr(main, "MAX_DESCRIPTIONS_PER_RUN", 2)
-    monkeypatch.setattr(main, "_download_description_batch", lambda *_args: None)
+    monkeypatch.setattr(main, "_PREFERENCES", main.SearchPreferences())
+    monkeypatch.setattr(main, "_ACTIVE_SOURCES", None)
+
+    def fake_fetch(_context, _url):
+        return {"description": LISTING_TEXT, "email": ""}
+
+    monkeypatch.setattr(main, "fetch_description", fake_fetch)
     jobs = [normalize_job(_raw(f"https://example.ch/{number}", f"Job {number}")) for number in range(1, 5)]
-    jobs[0][main.DESCRIPTION_DEFERRED] = True  # left over from an earlier run: cleared first
 
     main._download_descriptions(None, jobs)
 
-    waiting = [job["title"] for job in jobs if job.get(main.DESCRIPTION_DEFERRED)]
-    assert waiting == ["Job 3", "Job 4"]
-    assert [job["title"] for job in main._jobs_worth_analyzing(jobs)] == ["Job 1", "Job 2"]
+    can_be_rated = [job["title"] for job in jobs if ai_analyzer.has_listing_text(job)]
+    assert can_be_rated == ["Job 1", "Job 2"]
 
 
 def test_a_job_that_already_has_its_description_is_rated(monkeypatch) -> None:

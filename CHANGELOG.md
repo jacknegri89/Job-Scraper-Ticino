@@ -2,7 +2,42 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [1.2.0] - 2026-11-10
+
+### Added
+- **Readable listing text.** Only the text of the listing is stored (login walls, buttons and cookie notices are removed) and shown in paragraphs, up to 6,000 characters, with *Show full text*.
+- **Translate to Italian** for listings in English, German or French, done by the browser's own translator on the device. If the browser cannot translate, the text stays unchanged and a separate *Send the text to Google Translate* button appears.
+- **Exit codes** a scheduler can trust (`0` success, `1` failure, `2` partial, `3` another search is running) and **one search at a time per folder**, across the panel, the command line and scheduled tasks.
+- `--ai` on the command line and a cap on the listings rated per search (25 by default).
+- Remote and hybrid work read from clear statements in the description, never from denials or vague mentions.
+- `run_scheduled.bat` for Windows Task Scheduler, using the project's `.venv` and passing the exit code on.
+- Pinned dependencies, `requirements-dev.txt`, Dependabot, and CI jobs for Windows, for the dependency audit and for the browser tests (there a missing Chromium is a failure, not a skip).
+- `tools/make_screenshots.py` redraws the pictures in `docs/` from invented listings only.
+
+### Changed
+- **The dashboard is redesigned for reading**: system fonts at 16 px, plain cards, one colour for actions. A listing whose text could not be read says so.
+- **The AI is off until you switch it on** (panel or `--ai`); `OPENAI_API_KEY` alone starts nothing. It rates only visible, non-expired listings that have a description: never from the title alone, so never twice.
+- **Seen is not the same as wanted.** Every listing a scan finds counts as seen; the filters decide only what is shown, what gets a description and what the AI rates. "Not stated" seniority or contract hides a listing only after its text has been read.
+- Scan outcomes are stricter: a source with nothing read is a failure, a block is never hidden by a later note, a search with no results lets saved listings expire, and a scan where no source could be read leaves the cache and the dashboard untouched.
+- A listing page that keeps giving no text is tried three times, then once a week.
+- Fields: fashion and product developers, sales and real-estate roles are no longer software jobs; PLC and HMI programming is "Electronics & machining"; a customer-service "help desk" is IT only when its description says so.
+- De-duplication compares whole company names and keeps the link to a portal that was blocked in a run.
+
+### Fixed
+- A saved listing that was still online was marked "possibly expired" when a filter hid it.
+- Login walls and cookie notices were stored and shown as listing text, and seniority or contract were guessed from them.
+- The search box could not find text with `&`, quotes or apostrophes (the text was escaped twice).
+- A lock older than 12 hours was taken from a search that was still running, and two searches could both take a lock left by a crash.
+- A listing whose text said "not found" could be marked as removed; a translated anti-bot page was reported as a changed page instead of a block.
+- A control character in the "sales" rule kept it from ever matching, so sales titles counted as software jobs.
+- The backup of the previous run's cache was replaced by the first save of the current run.
+
+### Security
+- Description pages: a redirect to a host outside the allowed list is refused before it is requested.
+- The dashboard script is allowed by its hash and the panel script by a one-time nonce, instead of `unsafe-inline`; the dashboard is written in one step.
+- Downloads are size-limited, and the browser session file is readable by its owner only on Linux and macOS.
+
+## [1.1.0] - 2026-11-08
 
 ### Added
 - Lombardy next to Ticino: Indeed Italia and LinkedIn Italia, about 2,500 places known offline, a search area made of regions, a radius around your starting point and extra towns or provinces.
@@ -16,36 +51,12 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - Settings version 2 with an automatic migration and a one-time `.v1.bak` backup; atomic cache writes with backups.
 - The panel can look a town up for the starting point and choose every new option.
 
-- Exit codes a scheduler can trust: `0` success, `1` failure, `2` partial, `3` another search is running. The panel shows the same outcome.
-- One search at a time per folder (a lock file, with recovery of locks left by a crash), also across the panel, the command line and scheduled tasks.
-- `--ai` to ask for the AI rating on the command line, and a setting for the most listings rated per search (25 by default).
-- Remote and hybrid work read from clear statements in the description, never from denials or vague mentions.
-- `scrapers/pagination.py`: a shared page loop that keeps the listings already read when a later page fails and reports blocks and login walls.
-- `run_scheduled.bat` for Windows Task Scheduler, using the project's `.venv`, writing `scraper.log` and passing the exit code on.
-- `requirements-dev.txt`, pinned dependencies, Dependabot, a Windows test job, a dependency audit job and the security rules of bandit in the lint step.
-
 ### Changed
 - The project is now called JobScraper (it was Job Scraper Ticino). The old GitHub address redirects to the new one.
 - The cross-border estimate treated 0.96 as EUR per CHF, about 12% below the ECB rate, and used the 2025 second IRPEF bracket and a wrong deduction formula for the 28,000-50,000 EUR band. All three are fixed.
 - Italian portals are no longer rejected by the filter. Listings are placed by their location, not by a fixed list of eight municipalities (settings from earlier versions keep exactly that behaviour).
 - Fields: electronics and machining are now a separate field from software, IT and AI; "Programmatore CNC" is no longer a software job.
 - A listing page is opened for at most 60 new jobs per run.
-
-- The AI is off until you switch it on (panel or `--ai`). Before, having `OPENAI_API_KEY` set could start paid requests when no settings were saved, and every cached listing was sent, including those your filters hide or that had expired.
-- A source with `ok_partial` and nothing read is now a failure; a later "no results" or "partial" note can no longer hide an earlier block or failed page; listings next to a failed search are partial, not `ok`.
-- A search that finished with no results now lets saved listings of that source expire; blocks, errors and partial reads still never do.
-- Seniority, contract type and work mode are read again once the description is known, and unknown values are only filtered then, so an excluded "senior" listing no longer slips through and a listing is no longer dropped before its description could settle it.
-- A scan where no source could be read leaves the cache and the dashboard untouched.
-- The dashboard is written in one step, so a crash cannot leave a half-written page.
-- The dashboard script is allowed by its hash instead of `unsafe-inline`; the panel script needs a one-time nonce.
-- De-duplication compares whole company names (it truncated them to 25 characters, so two long names with the same start were merged) and keeps an AI rating that only the other copy had.
-- Windows scheduling uses the project's virtual environment instead of whichever `python` is on the PATH.
-- The panel and the command line refuse to start a second search while one is running.
-- The backup of the previous run's cache is no longer replaced by the first save of the current run.
-- The description download refused hosts outside the allowed list, but a redirect to another host was followed by the browser. Redirects are now checked before they are requested.
-- The job index download is size-limited; the browser session file is readable by its owner only on Linux and macOS.
-- `playwright-stealth` needs version 2 or later (the code uses its `Stealth` class); `requirements.txt` said 1.0.
-- Removed four unused functions.
 
 ### Fixed
 - AI results were reused after the candidate profile changed.
@@ -70,3 +81,6 @@ First public release.
 - jobs.ch: a crashed page no longer ruins the remaining search terms, and pagination stops when the portal repeats results.
 - Panel: rejected requests no longer cause a connection reset on Windows.
 - Distances are hidden when no starting point is configured, instead of being computed from placeholder coordinates.
+
+[1.2.0]: https://github.com/jacknegri89/JobScraper/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/jacknegri89/JobScraper/releases/tag/v1.1.0

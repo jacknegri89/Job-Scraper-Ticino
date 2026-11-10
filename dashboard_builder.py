@@ -1,16 +1,18 @@
 """
 Generate the interactive ``index.html`` job dashboard.
 
-Design: a road-sign header, a filter rail (search, sort, field, country, seniority,
-freshness, salary) and one ticket-style row per job. Each row shows where the job is
-and how sure we are, which portal it comes from, when it was published and last
-checked, the salary that is written in the listing or estimated (with its origin and
-assumptions) and the distance from home as a small route ruler. Light and dark themes
-follow the system setting. Nothing is loaded from the internet.
+Design: a plain header, a filter rail (search, sort, field, country, seniority, freshness,
+salary) and one card per job. A card shows the listing text (shortened until the reader asks
+for more, with a button that translates it into Italian), where the job is and how sure we are,
+which portal it comes from, when it was published and last checked, the salary that is written
+in the listing or estimated (with its origin and assumptions) and the distance from home as a
+small route ruler. Light and dark themes follow the system setting. Nothing is loaded from the
+internet; the translate button uses the browser's own translator and only opens an online one
+when the reader presses it.
 
 File layout:
   - presentation constants (CATEGORY, SOURCE_LABEL, label tables)
-  - raw description cleanup (_clean_raw)
+  - description paragraphs (_description_paragraphs)
   - card helpers, one named function per HTML block
   - build_card: assemble one job card
   - generate_html: compute dashboard stats and fill the page template
@@ -26,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from ai_analyzer import AI_DESCRIPTION, AI_REASON, AI_SUITABLE, normalize_ai_fields
+from description_text import description_paragraphs, detect_language
 from distance_calculator import HOME_CITY, is_home_configured, km_from_home
 from fx_rates import FxRate, manual_rate
 from job_model import normalize_job
@@ -133,6 +136,9 @@ _JUNK_PREFIX = (
     "dettagli dell", "offerta:", "soggetto:",
 )
 
+# A paragraph shorter than this is a stray word, not text worth showing.
+MIN_PARAGRAPH_CHARS = 3
+
 # Label prefixes removed from the start of a description segment.
 _LABEL_PREFIX = ("descrizione:", "dettagli:", "offerta di lavoro:", "soggetto:")
 
@@ -148,51 +154,74 @@ def _strip_label_prefix(segment: str) -> str:
 
 def _is_junk(segment: str) -> bool:
     lowered = segment.lower()
-    if len(segment) < 20:
+    if len(segment) < MIN_PARAGRAPH_CHARS:
         return True
     if any(junk in lowered for junk in _JUNK):
         return True
     return lowered.startswith(_JUNK_PREFIX)
 
 
-def _clean_raw(text: str) -> str:
-    """Remove breadcrumbs, buttons, and form metadata from scraped text."""
-    segments = [part.strip() for part in text.split(" | ") if part.strip()]
-    useful_segments: list[str] = []
-    for segment in segments:
-        segment = _strip_label_prefix(segment)
-        if not _is_junk(segment):
-            useful_segments.append(segment)
-    return " ".join(useful_segments)
+def _description_paragraphs(job: Job) -> list[str]:
+    """The listing text as paragraphs: portal navigation removed, a label prefix cut off."""
+    paragraphs: list[str] = []
+    for paragraph in description_paragraphs(str(job.get("description") or "")):
+        paragraph = _strip_label_prefix(paragraph)
+        if not _is_junk(paragraph):
+            paragraphs.append(paragraph)
+    if paragraphs:
+        return paragraphs
+    # No listing text was downloaded: fall back to the AI summary, if there is one.
+    return description_paragraphs(str(job.get(AI_DESCRIPTION) or ""))
 
 
 # ----------------------------------------------------------------
 # Card blocks, one function per block
 # ----------------------------------------------------------------
 
-def _description_html(job: Job) -> str:
-    """Prefer the AI description, then fall back to cleaned raw text."""
-    ai_description = str(job.get(AI_DESCRIPTION) or "").strip()
-    if ai_description:
-        return _escape_html(ai_description).replace("\n", "<br>")
-
-    raw_description = str(job.get("description") or "").strip()
-    if not raw_description:
-        return ""
-    cleaned = _clean_raw(raw_description)
-    if not cleaned:
-        return ""
-    truncated = cleaned[:700]
-    if len(cleaned) > 700:
-        truncated += "..."
-    return _escape_html(truncated)
+# A description longer than this is shortened on the card until the reader opens it.
+LONG_DESCRIPTION_CHARS = 420
+# Shown instead of the text when the listing page gave none (a login wall, a block, not opened yet).
+NO_DESCRIPTION_TEXT = "The portal did not give the text of this listing. Open the listing to read it."
+# Languages the translate button offers to turn into Italian (Italian text needs no button).
+TRANSLATABLE_LANGUAGES = ("en", "de", "fr")
 
 
 def _description_block(job: Job) -> str:
-    body = _description_html(job)
-    if not body:
+    paragraphs = _description_paragraphs(job)
+    if not paragraphs:
+        return f'<div class="desc"><p class="desc-missing">{NO_DESCRIPTION_TEXT}</p></div>'
+    language = detect_language(" ".join(paragraphs))
+    is_long = sum(len(paragraph) for paragraph in paragraphs) > LONG_DESCRIPTION_CHARS
+    text_class = "desc-text"
+    if is_long:
+        text_class += " clamp"
+    language_attribute = ""
+    if language:
+        language_attribute = f' lang="{language}"'
+    body = "".join(f"<p>{_escape_html(paragraph)}</p>" for paragraph in paragraphs)
+    tools = _expand_button(is_long) + _translate_button(language)
+    return (
+        f'<div class="desc" data-lang="{language}">'
+        f'<div class="{text_class}"{language_attribute}>{body}</div>'
+        f'<div class="desc-tools">{tools}<span class="desc-note" role="status"></span></div></div>'
+    )
+
+
+def _expand_button(is_long: bool) -> str:
+    if not is_long:
         return ""
-    return f'<p class="card-desc">{body}</p>'
+    return '<button type="button" class="link-btn" data-action="expand" aria-expanded="false">Show full text</button>'
+
+
+def _translate_button(language: str) -> str:
+    """The on-device button, and a hidden second one that sends the text to Google when pressed."""
+    if language not in TRANSLATABLE_LANGUAGES:
+        return ""
+    on_device = (f'<button type="button" class="link-btn" data-action="translate" data-from="{language}">'
+                 "Translate to Italian</button>")
+    online = (f'<button type="button" class="link-btn" data-action="translate-online" data-from="{language}" hidden>'
+              "Send the text to Google Translate</button>")
+    return on_device + online
 
 
 def _ai_block(job: Job) -> tuple[str, str]:
@@ -347,10 +376,14 @@ def _safe_url(url: object) -> str:
 
 
 def _search_blob(job: Job) -> str:
-    """Lowercase text used by the live search box."""
+    """Lowercase text used by the live search box.
+
+    Plain text on purpose: _card_open escapes every attribute once. Escaping here as well
+    turned "AT&T" into "at&amp;t" in the page, and the search could not find it.
+    """
     fields = (str(job.get("title") or ""), str(job.get("company") or ""),
               str(job.get("city") or ""), str(job.get("place_name") or ""), str(job.get("email") or ""))
-    return _escape_html(" ".join(fields).lower())
+    return " ".join(fields).lower()
 
 
 def _location_text(job: Job) -> str:

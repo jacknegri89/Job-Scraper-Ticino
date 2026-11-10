@@ -2,6 +2,11 @@
 
 Order: normalize, check the link, check the area, check field/seniority/contract
 preferences, then merge duplicates across portals.
+
+Two lists come out, because "the portal shows it" and "the user wants it" are different facts:
+    jobs          wanted listings; they enter the cache and the dashboard
+    hidden_jobs   listings with a safe link that the current filters hide; they only prove
+                  that a cached copy is still online (see job_lifecycle.merge_scan)
 """
 
 from collections import Counter
@@ -10,7 +15,7 @@ from dataclasses import dataclass, field
 import geo
 from job_dedup import deduplicate
 from job_classifier import CONTRACT_UNKNOWN, SENIORITY_UNKNOWN
-from job_filter import is_safe_job_url
+from job_filter import category_awaits_description, is_safe_job_url
 from job_model import normalize_job
 from preferences import SearchPreferences
 
@@ -39,6 +44,7 @@ class SourceStats:
 class PipelineResult:
     jobs: list[dict]
     stats: dict[str, SourceStats]
+    hidden_jobs: list[dict] = field(default_factory=list)
 
 
 def exclusion_reason(job: dict, preferences: SearchPreferences, final: bool = True) -> str:
@@ -67,13 +73,22 @@ def _location_of(job: dict) -> geo.Location:
 
 
 def _preference_reason(job: dict, preferences: SearchPreferences, final: bool) -> str:
-    if preferences.categories is not None and job.get("category") not in preferences.categories:
+    if _category_rejected(job, preferences, final):
         return REASON_CATEGORY
     if _is_rejected(job.get("seniority"), preferences.seniority_levels, SENIORITY_UNKNOWN, final):
         return REASON_SENIORITY
     if _is_rejected(job.get("contract_type"), preferences.contract_types, CONTRACT_UNKNOWN, final):
         return REASON_CONTRACT
     return ""
+
+
+def _category_rejected(job: dict, preferences: SearchPreferences, final: bool) -> bool:
+    """A category that the description may still change is not used to drop a job early."""
+    if preferences.categories is None or job.get("category") in preferences.categories:
+        return False
+    if not final and category_awaits_description(str(job.get("title") or ""), str(job.get("description") or "")):
+        return False
+    return True
 
 
 def _is_rejected(value: object, wanted: tuple | frozenset | list | None, unknown_value: str, final: bool) -> bool:
@@ -89,19 +104,23 @@ def process_jobs(raw_jobs: list[dict], preferences: SearchPreferences) -> Pipeli
     """Normalize, filter and de-duplicate jobs; count what happened per source."""
     stats: dict[str, SourceStats] = {}
     wanted_jobs: list[dict] = []
+    hidden_jobs: list[dict] = []
     for raw_job in raw_jobs:
         job = normalize_job(raw_job)
         source_stats = stats.setdefault(str(job.get("source") or "?"), SourceStats())
         source_stats.collected += 1
         # Without a description the seniority and contract may only look unknown.
         reason = exclusion_reason(job, preferences, final=bool(job.get("description")))
-        if reason:
-            source_stats.excluded[reason] += 1
+        if not reason:
+            wanted_jobs.append(job)
             continue
-        wanted_jobs.append(job)
+        source_stats.excluded[reason] += 1
+        # A listing with an unsafe link is not trusted at all; any other one was really seen.
+        if reason != REASON_INVALID_URL:
+            hidden_jobs.append(job)
     unique_jobs, duplicate_jobs = deduplicate(wanted_jobs)
     _count_results(unique_jobs, duplicate_jobs, stats)
-    return PipelineResult(jobs=unique_jobs, stats=stats)
+    return PipelineResult(jobs=unique_jobs, stats=stats, hidden_jobs=hidden_jobs)
 
 
 def _count_results(unique_jobs: list[dict], duplicate_jobs: list[dict], stats: dict[str, SourceStats]) -> None:

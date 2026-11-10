@@ -321,3 +321,106 @@ def test_newest_published_listing_comes_first(tmp_path: Path, monkeypatch: Monke
     page = _page(dashboard, tmp_path, [older, newer])
 
     assert page.index("Newer job") < page.index("Older job")
+
+
+ENGLISH_TEXT = (
+    "We are looking for a developer with experience in the cloud, and you will work with our team on the platform. "
+    "You will build services for our customers and the team."
+)
+ITALIAN_TEXT = (
+    "Cerchiamo una persona con esperienza nello sviluppo di applicazioni per la nostra azienda, che lavori con il team "
+    "e con i clienti."
+)
+
+
+def test_an_english_description_gets_a_translate_to_italian_button(monkeypatch: MonkeyPatch) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+
+    card = dashboard.build_card(_job(description=ENGLISH_TEXT))
+
+    assert 'data-lang="en"' in card
+    assert 'data-action="translate" data-from="en"' in card
+    assert "Translate to Italian" in card
+
+
+def test_an_italian_description_needs_no_translate_button(monkeypatch: MonkeyPatch) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+
+    card = dashboard.build_card(_job(description=ITALIAN_TEXT))
+
+    assert 'data-lang="it"' in card
+    assert "Translate to Italian" not in card
+
+
+def test_a_card_without_listing_text_says_so_and_offers_no_text_tools(monkeypatch: MonkeyPatch) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+
+    card = dashboard.build_card(_job(description=""))
+
+    assert "The portal did not give the text of this listing" in card
+    assert 'class="desc-text' not in card
+    assert "Translate to Italian" not in card
+    assert "Show full text" not in card
+
+
+def test_a_login_wall_stored_by_an_older_scan_is_not_shown(monkeypatch: MonkeyPatch) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+    wall = " | ".join(["Iscriviti o accedi per trovare il tuo prossimo lavoro", "Email o telefono", "Password",
+                       "Hai dimenticato la password? Accedi", "Non hai un account LinkedIn? Iscriviti ora"])
+
+    card = dashboard.build_card(_job(source="linkedin.it", description=wall))
+
+    assert "Hai dimenticato la password" not in card
+    assert 'class="desc-text' not in card
+    assert "The portal did not give the text of this listing" in card
+
+
+def test_a_long_description_is_shortened_until_opened_and_every_paragraph_is_escaped(monkeypatch: MonkeyPatch) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+    long_text = " | ".join([
+        ENGLISH_TEXT,
+        "<script>alert(1)</script> and more text for the second paragraph.",
+        ENGLISH_TEXT.replace("developer", "tester"),
+        ENGLISH_TEXT.replace("developer", "designer"),
+    ])
+
+    card = dashboard.build_card(_job(description=long_text))
+
+    assert 'class="desc-text clamp"' in card
+    assert 'data-action="expand"' in card
+    assert "<script>alert" not in card
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in card
+
+
+def test_a_short_description_is_shown_whole_without_an_expand_button(monkeypatch: MonkeyPatch) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+
+    card = dashboard.build_card(_job(description="Posizione 100% remoto."))
+
+    assert 'class="desc-text"' in card
+    assert 'data-action="expand"' not in card
+
+
+def test_the_page_script_has_no_ternary_and_the_translate_code_is_in_the_hash_protected_script(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    dashboard = load_dashboard_module(monkeypatch)
+    output = tmp_path / "index.html"
+
+    dashboard.generate_html([_job(description=ENGLISH_TEXT)], output)
+    page = output.read_text(encoding="utf-8")
+
+    assert "async function onTranslateClick" in page
+    assert "translate.google.com" in page
+    assert dashboard._script_hash(page[page.index("<script>") + len("<script>"):page.index("</script>")]) in page
+
+
+def test_the_search_text_is_escaped_exactly_once(monkeypatch: MonkeyPatch) -> None:
+    """Twice-escaped text ("at&amp;amp;t") is still safe markup, but the search cannot find "AT&T"."""
+    job = {"title": "<b>Network</b> Engineer", "company": "AT&T \"Ticino\" & O'Brien", "city": "Chiasso",
+           "url": "https://www.jobs.ch/it/annuncio/1", "source": "jobs.ch"}
+
+    card = load_dashboard_module(monkeypatch).build_card(job)
+
+    assert 'data-search="&lt;b&gt;network&lt;/b&gt; engineer at&amp;t &quot;ticino&quot; &amp; o&#x27;brien chiasso' in card
+    assert "&amp;amp;" not in card
+    assert "&amp;lt;" not in card
+    assert "<b>Network</b>" not in card
