@@ -168,7 +168,8 @@ A *net* amount written in a listing is shown as written; it is never converted t
 The AI rating is optional and **off until you switch it on** (the panel's checkbox, or `--ai` / `--reanalyze` on the command line). `OPENAI_API_KEY` in your environment is necessary but never enough on its own.
 
 - **What is sent.** Your profile text and, for each rated listing, its title, company, place and the start of its description, to OpenAI. Listing text goes in as an escaped JSON value and the model is told to treat it as untrusted data. That limits prompt injection but cannot rule it out: a listing could still try to sway the rating, so treat it as a hint.
-- **What it costs.** OpenAI bills each request (model `gpt-4o-mini`, one request per listing). The amount depends on OpenAI's current prices and on the listing length, so check your own usage page. To keep the bill predictable, one search rates at most **25 listings** by default (setting "Most listings rated per search", 1 to 200), newest first; the others wait for the next search. Listings that are possibly expired or gone are never sent, and neither are listings your filters hide or listings whose description is still expected on a next search (the rating would have to be paid again when the text arrives).
+- **What it costs.** OpenAI bills each request (model `gpt-4o-mini`, one request per listing). The amount depends on OpenAI's current prices and on the listing length, so check your own usage page. To keep the bill predictable, one search rates at most **25 listings** by default (setting "Most listings rated per search", 1 to 200), newest first; the others wait for the next search. Listings that are possibly expired or gone are never sent, and neither are listings your filters hide.
+- **Only listings with a description are rated.** A listing whose text could not be read (not opened yet, blocked, or failed however many times) is never sent: a rating from the title alone would be poor and would be paid again when the text arrives. Such a listing stays in the cache and on the dashboard, which says that the portal gave no text.
 - **Nothing is paid twice.** A rating is stored with a key made of the prompt version, the model, a fingerprint of your profile and the listing text. It is reused while all of these are unchanged and re-done when any of them changes.
 - **When the API fails.** Each request has a 10-second timeout and up to 4 attempts with growing waits on rate limits. After 3 failures in a row the run stops asking, and the remaining listings stay pending for the next run. If the credit is exhausted the run says so and stops. A malformed answer is never stored: after the attempts the listing is marked *not analyzable* and retried only with `--reanalyze`.
 - **What is checked.** Every answer must be a JSON object with a true/false verdict and plain text; text is shortened; a salary is kept only if its currency matches the country and the amount is plausible.
@@ -311,7 +312,7 @@ GitHub Actions runs the linter and the tests on Python 3.10 and 3.12 (Ubuntu) an
 
 The pictures in `docs/` come from `python tools/make_screenshots.py`, which draws the dashboard and the panel from invented listings only.
 
-Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to set up, how to add a new source and what a good pull request looks like.
+Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to set up, how to add a new source and what a good pull request looks like. What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Known limitations
 
@@ -319,11 +320,10 @@ Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to se
 - LinkedIn and some other portals block repeated automated requests. Run searches a few hours apart and read the status column.
 - Some portals show the salary only on the detail page or not at all; then the salary is "not available" unless the AI is on.
 - Only listings with a place that can be matched to Lombardy or Ticino are placed on the map of distances. Places outside those two regions are not known.
-- Only one search runs at a time per folder. A second one (another panel, the command line or a scheduled task) stops with exit code `3`. If a run was killed, its lock is recognised as stale and replaced automatically: the lock names its process and when that process started, so a lock is never taken from a search that is still running, however long it takes. If the system cannot tell (rare), the message says to delete `.jobscraper.lock` by hand.
+- Only one search runs at a time per folder. A second one (another panel, the command line or a scheduled task) stops with exit code `3`. If a run was killed, its lock is recognised as stale and replaced automatically: the lock names its process and when that process started, so a lock is never taken from a search that is still running, however long it takes, and two searches that find the same abandoned lock at the same moment cannot both take it. If the system cannot tell whose lock it is (rare), the message says to delete `.jobscraper.lock` by hand.
 - The panel starts a search but has no stop button: close the search from the Task Manager (or `kill`) if you need to; the next run recovers by itself.
 - If you change the search terms, saved listings that the new terms no longer find become *possibly expired* after a complete scan, and a few are re-checked on their own page at each run.
-- A portal can serve its login page instead of a listing (LinkedIn does, at times). That listing stays without text and is tried again on the next runs, then once a week.
-- A listing whose page never gives its text (three failed attempts) or whose portal is blocked is rated by the AI from the title alone; if the description arrives later, the rating is made again and billed again.
+- A portal can serve its login page instead of a listing (LinkedIn does, at times). That listing stays without text and is tried again on the next runs, then once a week. Until its text arrives the dashboard says so, and the AI does not rate it.
 - Translation covers English, German and French listings only, and needs a browser with a built-in translator (see [Reading and translating](#reading-and-translating)).
 - On a phone the filters come before the listings and take most of the first screen.
 - Distances are straight-line estimates. The portals' own "near me" radius can differ, and a portal may ignore the radius for some searches.
