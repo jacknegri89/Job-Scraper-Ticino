@@ -1,7 +1,8 @@
 """The generated dashboard in a real Chromium: the translate buttons, hostile and very long text.
 
-It needs the Playwright browser (python -m playwright install chromium) and is skipped when it
-is not installed. Nothing here touches the internet: Google Translate is never really opened.
+It needs the Playwright browser (python -m playwright install chromium); see tests/conftest.py for
+when a missing browser is a skip and when it is a failure. Nothing here touches the internet:
+Google Translate is never really opened.
 """
 
 import time
@@ -10,8 +11,6 @@ from pathlib import Path
 import pytest
 
 import dashboard_builder
-
-sync_api = pytest.importorskip("playwright.sync_api")
 
 ENGLISH_TEXT = (
     "We are looking for a developer with experience in the cloud, and you will work with our team on the platform. "
@@ -44,17 +43,6 @@ def _job(title: str, description: str, **extra: object) -> dict:
            "description": description}
     job.update(extra)
     return job
-
-
-@pytest.fixture(scope="module")
-def browser():
-    with sync_api.sync_playwright() as playwright:
-        try:
-            chromium = playwright.chromium.launch()
-        except Exception as error:
-            pytest.skip(f"Chromium is not installed: {type(error).__name__}")
-        yield chromium
-        chromium.close()
 
 
 def _open_dashboard(browser, tmp_path: Path, jobs: list[dict], init_script: str = "", width: int = 1280):

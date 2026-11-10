@@ -1,7 +1,8 @@
 """The description request filter in a real Chromium, against local servers.
 
 This proves that a redirect to another host is never requested. It needs the Playwright
-browser (python -m playwright install chromium) and is skipped when it is not installed.
+browser (python -m playwright install chromium); see tests/conftest.py for when a missing
+browser is a skip and when it is a failure.
 """
 
 import http.server
@@ -10,8 +11,6 @@ import threading
 import pytest
 
 import scrapers
-
-sync_api = pytest.importorskip("playwright.sync_api")
 
 
 class _Server:
@@ -63,18 +62,6 @@ def servers():
     yield portal, hits
     portal.stop()
     other_host.stop()
-
-
-@pytest.fixture(scope="module")
-def browser():
-    """One Chromium for the whole module; the tests are skipped when it is not installed."""
-    with sync_api.sync_playwright() as playwright:
-        try:
-            chromium = playwright.chromium.launch(headless=True)
-        except Exception as error:
-            pytest.skip(f"Chromium is not available: {type(error).__name__}")
-        yield chromium
-        chromium.close()
 
 
 def _open(browser, portal_port: int, path: str, monkeypatch) -> str:
