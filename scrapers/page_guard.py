@@ -197,6 +197,9 @@ BLOCK_SIGNALS = (
     "please verify", "verifica di essere", "non sono un robot",
     "are you a robot", "cloudflare", "attention required",
     "rate limit", "too many requests",
+    # The title of the "checking your browser" page, in the languages the portals use.
+    "just a moment", "ci siamo quasi", "nur einen moment", "un instant…", "un instant...",
+    "additional verification required", "ulteriore verifica richiesta",
 )
 
 

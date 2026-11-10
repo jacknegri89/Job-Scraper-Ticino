@@ -75,6 +75,31 @@ def test_a_block_page_is_reported_and_not_probed_further(report, monkeypatch) ->
     assert _probe(report, monkeypatch, FakePage(title="Access Denied")) == "blocked"
 
 
+@pytest.mark.parametrize("challenge_title", [
+    "Just a moment...",
+    "Ci siamo quasi…",
+    "Nur einen Moment…",
+    "Un instant…",
+    "Additional Verification Required",
+    "Ulteriore verifica richiesta",
+])
+def test_an_anti_bot_check_in_any_portal_language_is_a_block_not_a_changed_page(report, monkeypatch,
+                                                                                challenge_title) -> None:
+    """Seen on indeed.it: the check page has no results, but the portal's markup did not change."""
+    page = FakePage(title=challenge_title, has_selector=False)
+
+    assert _probe(report, monkeypatch, page) == "blocked"
+
+
+@pytest.mark.parametrize("ordinary_title", [
+    "Sviluppatore jobs in Lombardia | Indeed",
+    "Offerte di lavoro: un momento di crescita in Ticino",
+    "Stellen als Moment Engineer",
+])
+def test_an_ordinary_results_page_is_not_mistaken_for_a_block(report, monkeypatch, ordinary_title) -> None:
+    assert _probe(report, monkeypatch, FakePage(title=ordinary_title)) == "ok"
+
+
 def test_a_login_wall_is_reported(report, monkeypatch) -> None:
     assert _probe(report, monkeypatch, FakePage(url="https://portal.example/login")) == "requires_auth"
 

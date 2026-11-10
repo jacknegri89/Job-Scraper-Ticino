@@ -262,10 +262,14 @@ def fetch_description(context: BrowserContext, url: str, max_chars: int = MAX_DE
             description_context.close()
 
 
+# Wording of a removed-listing page. A bare "not found" is not here on purpose: listing texts
+# say it too ("fix 404 Not Found errors"), and a job that is online would be marked as gone.
 _EXPIRED_MARKERS = (
-    "no longer available", "no longer active", "has expired", "job expired", "not found",
+    "no longer available", "no longer active", "has expired", "job expired",
+    "job not found", "page not found", "listing not found",
     "non è più disponibile", "non e più disponibile", "annuncio scaduto", "offerta scaduta",
-    "annuncio non trovato", "nicht mehr verfügbar", "stelle nicht gefunden",
+    "annuncio non trovato", "pagina non trovata", "nicht mehr verfügbar", "stelle nicht gefunden",
+    "seite nicht gefunden",
 )
 _VERDICT_AVAILABLE = "available"
 _VERDICT_GONE = "gone"
