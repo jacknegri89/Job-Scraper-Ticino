@@ -178,9 +178,20 @@ def _has_results(job: Job) -> bool:
     return job.get(AI_SUITABLE) is not None or job.get(AI_SALARY) is not None or job.get(AI_GROSS_SALARY) is not None
 
 
+def has_listing_text(job: Job) -> bool:
+    """True when a description was read for this listing.
+
+    A listing is never rated from its title alone: the rating would be poor, and it would be
+    paid a second time when the text arrives. Without text the listing simply waits.
+    """
+    return bool(_clean_text(job.get("description"), _MAX_DESCRIPTION_CHARS))
+
+
 def _pending_indexes(jobs: list[Job], keys: list[str], retry_unanalyzable: bool) -> list[int]:
     pending = []
     for index, (job, key) in enumerate(zip(jobs, keys, strict=True)):
+        if not has_listing_text(job):
+            continue
         state = analysis_state(job, key)
         if state == "to_analyze" or (state == STATUS_UNANALYZABLE and retry_unanalyzable):
             pending.append(index)
@@ -218,6 +229,9 @@ def _print_analysis_start(jobs: list[Job], keys: list[str], pending_indexes: lis
     stale = sum(1 for job in jobs if job.get(AI_STATUS) == STATUS_STALE)
     print(f"[LLM] {analyzed} up to date, {len(pending_indexes)} to analyze "
           f"({stale} because the profile or listing changed), {unanalyzable} not analyzable.")
+    without_text = sum(1 for job in jobs if not has_listing_text(job))
+    if without_text:
+        print(f"[LLM] {without_text} listings have no description yet: they are not rated and cost nothing.")
     if pending_indexes:
         estimated_minutes = int(len(pending_indexes) * _DELAY_BETWEEN_CALLS / 60) + 1
         print(f"[LLM] AI analysis for {len(pending_indexes)} jobs (estimate: ~{estimated_minutes} min); {AI_MODEL}.")

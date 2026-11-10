@@ -70,7 +70,6 @@ def test_after_three_failures_the_page_is_left_alone_until_the_waiting_days_pass
     assert opened == ["https://www.jobs.ch/it/annuncio/2"]
     assert resting[DESCRIPTION_ATTEMPTS_FIELD] == main.MAX_DESCRIPTION_ATTEMPTS
     assert due_again[DESCRIPTION_ATTEMPTS_FIELD] == main.MAX_DESCRIPTION_ATTEMPTS + 1
-    assert not resting.get(main.DESCRIPTION_DEFERRED), "a resting listing may be rated from its title"
 
 
 def test_a_description_that_arrives_clears_the_failure_count(monkeypatch) -> None:

@@ -212,7 +212,8 @@ def test_the_per_run_limit_sends_only_the_newest_listings(monkeypatch) -> None:
     monkeypatch.setattr(ai_analyzer, "_DELAY_BETWEEN_CALLS", 0)
     monkeypatch.setattr(ai_analyzer, "CANDIDATE_PROFILE_OVERRIDE", "Graduate with projects")
     monkeypatch.setattr(ai_analyzer, "_create_openai_client", lambda: client)
-    jobs = [normalize_job(_raw(f"https://example.ch/{number}", f"Job {number}", date=f"2026-11-0{number}"))
+    jobs = [normalize_job(_raw(f"https://example.ch/{number}", f"Job {number}", date=f"2026-11-0{number}",
+                               description=LISTING_TEXT))
             for number in range(1, 6)]
 
     ai_analyzer.analyze_jobs(jobs, max_jobs=2)
@@ -228,7 +229,8 @@ def test_without_a_limit_every_pending_job_is_rated(monkeypatch) -> None:
     monkeypatch.setattr(ai_analyzer, "_DELAY_BETWEEN_CALLS", 0)
     monkeypatch.setattr(ai_analyzer, "CANDIDATE_PROFILE_OVERRIDE", "Graduate with projects")
     monkeypatch.setattr(ai_analyzer, "_create_openai_client", lambda: client)
-    jobs = [normalize_job(_raw(f"https://example.ch/{number}", f"Job {number}")) for number in range(1, 4)]
+    jobs = [normalize_job(_raw(f"https://example.ch/{number}", f"Job {number}", description=LISTING_TEXT))
+            for number in range(1, 4)]
 
     ai_analyzer.analyze_jobs(jobs)
 
@@ -317,7 +319,7 @@ def test_a_large_log_is_rotated_and_a_small_one_is_left_alone(tmp_path) -> None:
     setup_panel.rotate_log_if_large(tmp_path / "missing.log", max_bytes=100)  # no log yet: nothing to do
 
 
-def test_listings_whose_description_waits_for_the_next_run_are_not_rated_yet(monkeypatch) -> None:
+def test_listings_whose_description_waits_for_the_next_run_cannot_be_rated_yet(monkeypatch) -> None:
     monkeypatch.setattr(main, "MAX_DESCRIPTIONS_PER_RUN", 2)
     monkeypatch.setattr(main, "_PREFERENCES", main.SearchPreferences())
     monkeypatch.setattr(main, "_ACTIVE_SOURCES", None)
@@ -327,29 +329,13 @@ def test_listings_whose_description_waits_for_the_next_run_are_not_rated_yet(mon
 
     monkeypatch.setattr(main, "fetch_description", fake_fetch)
     jobs = [normalize_job(_raw(f"https://example.ch/{number}", f"Job {number}")) for number in range(1, 5)]
-    jobs[0][main.DESCRIPTION_DEFERRED] = True  # left over from an earlier run: cleared first
 
     main._download_descriptions(None, jobs)
 
-    waiting = [job["title"] for job in jobs if job.get(main.DESCRIPTION_DEFERRED)]
-    assert waiting == ["Job 3", "Job 4"]
-    assert [job["title"] for job in main._jobs_worth_analyzing(jobs)] == ["Job 1", "Job 2"]
+    can_be_rated = [job["title"] for job in jobs if ai_analyzer.has_listing_text(job)]
+    assert can_be_rated == ["Job 1", "Job 2"]
 
 
 def test_a_job_that_already_has_its_description_is_rated(monkeypatch) -> None:
     job = normalize_job(_raw(description="A long description of the work and the team."))
     assert main._jobs_worth_analyzing([job]) == [job]
-
-
-def test_a_listing_whose_page_failed_is_rated_only_when_no_new_attempt_is_due(monkeypatch) -> None:
-    """Its text may arrive on the next run: rating the title now would be paid again then."""
-    failed_once = normalize_job(_raw("https://example.ch/1", "Failed once"))
-    failed_once["description_attempts"] = 1
-    gave_up = normalize_job(_raw("https://example.ch/2", "Gave up"))
-    gave_up["description_attempts"] = main.MAX_DESCRIPTION_ATTEMPTS
-    source_blocked = normalize_job(_raw("https://example.ch/3", "Source blocked"))
-    source_blocked["status"] = "cached_source_unavailable"
-
-    worth = main._jobs_worth_analyzing([failed_once, gave_up, source_blocked])
-
-    assert [job["title"] for job in worth] == ["Gave up", "Source blocked"]

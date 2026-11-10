@@ -228,3 +228,33 @@ def test_the_page_can_be_used_from_the_keyboard(browser, tmp_path) -> None:
         "[...document.querySelectorAll('input, select')].filter(control => control.labels.length === 0).length")
     assert unlabeled == 0
     context.close()
+
+
+# ---- listings whose text could not be read
+
+LONG_TEXT = " | ".join(f"Paragrafo {number}: sviluppo di servizi in Python per i clienti dell'azienda, in un piccolo "
+                       f"team di prodotto." for number in range(1, 41))
+
+
+@pytest.mark.parametrize("width", [MOBILE_WIDTH, DESKTOP_WIDTH])
+def test_a_listing_without_text_says_so_next_to_one_with_a_very_long_text(browser, tmp_path, width) -> None:
+    jobs = [_listing("Sviluppatore senza testo", "Alfa SA"),
+            _listing("Sviluppatore con testo lungo", "Beta SA", description=LONG_TEXT)]
+    context, page, problems = _open(browser, tmp_path, jobs, width=width)
+
+    without_text = page.locator(".card", has_text="Sviluppatore senza testo")
+    with_text = page.locator(".card", has_text="Sviluppatore con testo lungo")
+    assert "The portal did not give the text of this listing" in without_text.inner_text()
+    assert without_text.locator("button").count() == 0, "no expand or translate button without a text"
+    assert without_text.locator("a.apply-btn").count() == 1, "the link to the listing is still there"
+
+    closed_height = with_text.locator(".desc-text").bounding_box()["height"]
+    with_text.locator('[data-action="expand"]').click()
+    assert with_text.locator(".desc-text").bounding_box()["height"] > closed_height * 3
+    assert with_text.locator('[data-action="expand"]').inner_text() == "Show less"
+
+    page.fill("#search", "senza testo")
+    assert _visible_titles(page) == ["Sviluppatore senza testo"]
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "no horizontal scroll"
+    assert problems == []
+    context.close()

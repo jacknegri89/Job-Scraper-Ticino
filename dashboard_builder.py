@@ -180,6 +180,8 @@ def _description_paragraphs(job: Job) -> list[str]:
 
 # A description longer than this is shortened on the card until the reader opens it.
 LONG_DESCRIPTION_CHARS = 420
+# Shown instead of the text when the listing page gave none (a login wall, a block, not opened yet).
+NO_DESCRIPTION_TEXT = "The portal did not give the text of this listing. Open the listing to read it."
 # Languages the translate button offers to turn into Italian (Italian text needs no button).
 TRANSLATABLE_LANGUAGES = ("en", "de", "fr")
 
@@ -187,7 +189,7 @@ TRANSLATABLE_LANGUAGES = ("en", "de", "fr")
 def _description_block(job: Job) -> str:
     paragraphs = _description_paragraphs(job)
     if not paragraphs:
-        return ""
+        return f'<div class="desc"><p class="desc-missing">{NO_DESCRIPTION_TEXT}</p></div>'
     language = detect_language(" ".join(paragraphs))
     is_long = sum(len(paragraph) for paragraph in paragraphs) > LONG_DESCRIPTION_CHARS
     text_class = "desc-text"

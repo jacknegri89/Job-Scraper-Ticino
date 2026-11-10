@@ -131,7 +131,7 @@ h1 .to { font-weight: 400; color: var(--ink-2); margin-left: 8px; }
             color: var(--action); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .link-btn:hover { color: var(--action-hi); }
 .link-btn:disabled { color: var(--ink-3); cursor: progress; text-decoration: none; }
-.desc-note { font-size: 14px; color: var(--ink-3); }
+.desc-note, .desc-missing { font-size: 14px; color: var(--ink-3); }
 
 .ai { display: flex; gap: 10px; align-items: flex-start; }
 .ai-ico { flex: none; width: 22px; height: 22px; margin-top: 2px; border-radius: 50%;

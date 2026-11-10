@@ -59,8 +59,6 @@ LOCK_FILE = Path(run_lock.LOCK_FILE_NAME)
 
 # A listing page takes about 7 seconds to open; the rest are read on the next run.
 MAX_DESCRIPTIONS_PER_RUN = 60
-# Set on listings whose description waits for the next run; the AI does not rate them yet.
-DESCRIPTION_DEFERRED = "description_deferred"
 # A page that keeps giving no text (a login wall, a block) is opened on a few runs, then
 # only once every few days: the portal is not asked for the same failing page every day.
 MAX_DESCRIPTION_ATTEMPTS = 3
@@ -253,8 +251,6 @@ def _print_scan_summary(result: PipelineResult) -> None:
 
 
 def _download_descriptions(context: Any, valid_jobs: list[dict]) -> None:
-    for job in valid_jobs:
-        job.pop(DESCRIPTION_DEFERRED, None)
     now = datetime.now()
     jobs_to_download = [job for job in valid_jobs
                         if _needs_description(job) and _worth_a_description(job) and _may_try_description(job, now)]
@@ -265,9 +261,6 @@ def _download_descriptions(context: Any, valid_jobs: list[dict]) -> None:
     left_for_next_run = len(jobs_to_download) - MAX_DESCRIPTIONS_PER_RUN
     if left_for_next_run > 0:
         print(f"[DESC] Opening the {MAX_DESCRIPTIONS_PER_RUN} newest pages now; {left_for_next_run} more on the next run.")
-        # Their rating would change once the description arrives, so it waits for that run.
-        for job in jobs_to_download[MAX_DESCRIPTIONS_PER_RUN:]:
-            job[DESCRIPTION_DEFERRED] = True
     _download_description_batch(context, jobs_to_download[:MAX_DESCRIPTIONS_PER_RUN], len(valid_jobs))
 
 
@@ -581,31 +574,19 @@ def _finalize_jobs(valid_jobs: list[dict], started_at: datetime, retry_unanalyza
 
 
 def _jobs_worth_analyzing(jobs: list[dict]) -> list[dict]:
-    """Do not pay to rate a listing that is probably gone, or one still waiting for its description.
+    """Do not pay to rate a listing that is probably gone, or one whose "text" is a block page.
 
-    The rating depends on the description, so rating before it arrives would be paid twice.
+    A listing with no description at all is handed over too, but never sent: ai_analyzer rates
+    a listing only from its text (see has_listing_text), however many downloads have failed.
     """
     worth_analyzing = []
-    waiting = 0
     for job in jobs:
         if job.get("status") in (STATUS_POSSIBLY_EXPIRED, STATUS_GONE):
             continue
-        if _waits_for_its_description(job):
-            waiting += 1
+        if looks_like_block_page(str(job.get("description") or "")):
             continue
         worth_analyzing.append(job)
-    if waiting:
-        print(f"[AI] {waiting} listings wait for their description (next search) and are not rated yet.")
     return worth_analyzing
-
-
-def _waits_for_its_description(job: dict) -> bool:
-    """True while the text of the listing is still expected on one of the next runs."""
-    if job.get(DESCRIPTION_DEFERRED):
-        return True
-    if not _needs_description(job):
-        return False
-    return _failed_description_attempts(job) < MAX_DESCRIPTION_ATTEMPTS
 
 
 def _visible_jobs(jobs: list[dict]) -> list[dict]:

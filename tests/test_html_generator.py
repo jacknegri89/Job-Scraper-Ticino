@@ -352,13 +352,15 @@ def test_an_italian_description_needs_no_translate_button(monkeypatch: MonkeyPat
     assert "Translate to Italian" not in card
 
 
-def test_a_card_without_listing_text_has_no_description_block(monkeypatch: MonkeyPatch) -> None:
+def test_a_card_without_listing_text_says_so_and_offers_no_text_tools(monkeypatch: MonkeyPatch) -> None:
     dashboard = load_dashboard_module(monkeypatch)
 
     card = dashboard.build_card(_job(description=""))
 
-    assert 'class="desc"' not in card
+    assert "The portal did not give the text of this listing" in card
+    assert 'class="desc-text' not in card
     assert "Translate to Italian" not in card
+    assert "Show full text" not in card
 
 
 def test_a_login_wall_stored_by_an_older_scan_is_not_shown(monkeypatch: MonkeyPatch) -> None:
@@ -369,7 +371,8 @@ def test_a_login_wall_stored_by_an_older_scan_is_not_shown(monkeypatch: MonkeyPa
     card = dashboard.build_card(_job(source="linkedin.it", description=wall))
 
     assert "Hai dimenticato la password" not in card
-    assert 'class="desc"' not in card
+    assert 'class="desc-text' not in card
+    assert "The portal did not give the text of this listing" in card
 
 
 def test_a_long_description_is_shortened_until_opened_and_every_paragraph_is_escaped(monkeypatch: MonkeyPatch) -> None:
