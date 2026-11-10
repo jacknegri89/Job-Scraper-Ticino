@@ -15,8 +15,18 @@ from run_lock import AlreadyRunningError, exclusive_run, is_running
 DEAD_PID = 2_000_000_000
 
 
-def _write_lock(path, pid: int, started: float) -> None:
-    path.write_text(json.dumps({"pid": pid, "started": started}), encoding="utf-8")
+THIRTEEN_HOURS_AGO_SECONDS = 13 * 3600
+
+
+def _write_lock(path, pid: int, started: float, process_started: str | None = None) -> None:
+    owner = {"pid": pid, "started": started}
+    if process_started is not None:
+        owner["process_started"] = process_started
+    path.write_text(json.dumps(owner), encoding="utf-8")
+
+
+def _sleeping_process() -> subprocess.Popen:
+    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
 
 
 def test_the_lock_is_created_while_running_and_removed_afterwards(tmp_path) -> None:
@@ -58,7 +68,7 @@ def test_a_lock_left_by_a_dead_process_is_taken_over(tmp_path) -> None:
 
 def test_a_lock_of_a_live_process_is_respected(tmp_path) -> None:
     lock = tmp_path / ".jobscraper.lock"
-    sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    sleeper = _sleeping_process()
     try:
         _write_lock(lock, sleeper.pid, time.time())
         assert is_running(lock) is True
@@ -70,12 +80,67 @@ def test_a_lock_of_a_live_process_is_respected(tmp_path) -> None:
         sleeper.wait()
 
 
-def test_a_very_old_lock_is_stale_even_if_the_process_number_is_in_use(tmp_path) -> None:
+def test_an_old_lock_is_respected_while_the_scan_that_wrote_it_is_still_running(tmp_path) -> None:
+    """A scan can outlive any time limit (a laptop asleep overnight): age alone never frees its lock."""
     lock = tmp_path / ".jobscraper.lock"
-    too_old = time.time() - (run_lock.MAX_LOCK_HOURS + 1) * 3600
-    _write_lock(lock, os.getpid(), too_old)
+    scan = _sleeping_process()
+    try:
+        long_ago = time.time() - THIRTEEN_HOURS_AGO_SECONDS
+        _write_lock(lock, scan.pid, long_ago, run_lock._process_start_token(scan.pid))
+
+        assert is_running(lock) is True
+        with pytest.raises(AlreadyRunningError):
+            with exclusive_run(lock):
+                raise AssertionError("a second scan must not start next to a live one")
+        assert json.loads(lock.read_text(encoding="utf-8"))["pid"] == scan.pid
+    finally:
+        scan.kill()
+        scan.wait()
+
+
+def test_a_process_number_reused_by_another_program_does_not_hold_the_lock(tmp_path) -> None:
+    """The scan crashed and its number went to another program: that program started at another time."""
+    lock = tmp_path / ".jobscraper.lock"
+    _write_lock(lock, os.getpid(), time.time(), process_started="started-at-another-time")
 
     assert is_running(lock) is False
+    with exclusive_run(lock):
+        assert json.loads(lock.read_text(encoding="utf-8"))["process_started"] != "started-at-another-time"
+
+
+def test_the_lock_records_when_its_process_started(tmp_path) -> None:
+    lock = tmp_path / ".jobscraper.lock"
+    with exclusive_run(lock):
+        owner = json.loads(lock.read_text(encoding="utf-8"))
+
+    assert owner["process_started"] == run_lock._process_start_token(os.getpid())
+    if sys.platform in ("win32", "linux"):
+        assert owner["process_started"], "Windows and Linux can always tell when a process started"
+
+
+def test_the_start_time_of_a_process_is_stable_and_missing_for_a_dead_one() -> None:
+    assert run_lock._process_start_token(os.getpid()) == run_lock._process_start_token(os.getpid())
+    assert run_lock._process_start_token(DEAD_PID) is None
+
+
+def test_a_live_process_keeps_the_lock_when_its_start_time_cannot_be_read(tmp_path, monkeypatch) -> None:
+    """Old lock files and unusual systems: when in doubt the running scan wins, never two at once."""
+    lock = tmp_path / ".jobscraper.lock"
+    _write_lock(lock, os.getpid(), time.time() - THIRTEEN_HOURS_AGO_SECONDS)
+    assert is_running(lock) is True
+
+    monkeypatch.setattr(run_lock, "_process_start_token", lambda _pid: None)
+    _write_lock(lock, os.getpid(), time.time(), process_started="anything")
+    assert is_running(lock) is True
+
+
+def test_the_busy_message_says_how_to_recover_from_a_lock_nobody_owns(tmp_path) -> None:
+    lock = tmp_path / ".jobscraper.lock"
+    with exclusive_run(lock):
+        with pytest.raises(AlreadyRunningError) as error:
+            with exclusive_run(lock):
+                pass
+    assert lock.name in str(error.value)
 
 
 @pytest.mark.parametrize("content", ["not json", "[]", '{"pid": "x", "started": 1}', '{"pid": true, "started": 1}'])
