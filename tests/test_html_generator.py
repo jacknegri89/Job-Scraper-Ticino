@@ -408,3 +408,16 @@ def test_the_page_script_has_no_ternary_and_the_translate_code_is_in_the_hash_pr
     assert "async function onTranslateClick" in page
     assert "translate.google.com" in page
     assert dashboard._script_hash(page[page.index("<script>") + len("<script>"):page.index("</script>")]) in page
+
+
+def test_the_search_text_is_escaped_exactly_once(monkeypatch: MonkeyPatch) -> None:
+    """Twice-escaped text ("at&amp;amp;t") is still safe markup, but the search cannot find "AT&T"."""
+    job = {"title": "<b>Network</b> Engineer", "company": "AT&T \"Ticino\" & O'Brien", "city": "Chiasso",
+           "url": "https://www.jobs.ch/it/annuncio/1", "source": "jobs.ch"}
+
+    card = load_dashboard_module(monkeypatch).build_card(job)
+
+    assert 'data-search="&lt;b&gt;network&lt;/b&gt; engineer at&amp;t &quot;ticino&quot; &amp; o&#x27;brien chiasso' in card
+    assert "&amp;amp;" not in card
+    assert "&amp;lt;" not in card
+    assert "<b>Network</b>" not in card

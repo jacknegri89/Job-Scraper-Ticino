@@ -374,10 +374,14 @@ def _safe_url(url: object) -> str:
 
 
 def _search_blob(job: Job) -> str:
-    """Lowercase text used by the live search box."""
+    """Lowercase text used by the live search box.
+
+    Plain text on purpose: _card_open escapes every attribute once. Escaping here as well
+    turned "AT&T" into "at&amp;t" in the page, and the search could not find it.
+    """
     fields = (str(job.get("title") or ""), str(job.get("company") or ""),
               str(job.get("city") or ""), str(job.get("place_name") or ""), str(job.get("email") or ""))
-    return _escape_html(" ".join(fields).lower())
+    return " ".join(fields).lower()
 
 
 def _location_text(job: Job) -> str:
