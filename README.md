@@ -13,7 +13,7 @@ Built for people who live in the Milan–Como–Varese area and are willing to w
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-dark.png">
-  <img src="docs/dashboard-light.png" alt="The dashboard: a filter rail on the left and one ticket-style row per job, with its country, source, dates, freshness, seniority, salary and distance" width="920">
+  <img src="docs/dashboard-light.png" alt="The dashboard: filters on the left and one card per job, with the listing text, its field, seniority and contract, and on the side the place, distance, source, dates and salary" width="920">
 </picture>
 
 <sub>The dashboard follows your system theme. Screenshot generated with fictional sample data.</sub>
@@ -26,14 +26,15 @@ Looking for a job across a border means checking a dozen portals, each with its 
 
 JobScraper collects the listings, keeps the ones inside the area you choose (a radius around your town, whole regions, or both), merges the same job found on several portals, and turns the result into a single searchable page. It runs on your computer. There is no server, no account and no tracking.
 
-**Which jobs.** Every listing is sorted into one of three fields: *Software / IT / AI* (developers, system administrators, help desk, data and AI roles), *Technical* (electronics, machining, installation and maintenance) and *Other*. The panel lets you choose the fields you want; the default search terms cover all three, and a setup aimed at IT only is just a matter of ticking one field.
+**Which jobs.** Every listing is sorted into one of nine fields by its title: *Software / IT / AI* (developers, system administrators, IT help desk, data and AI roles), *Electronics & machining* (PLC and CNC programming, electricians, electronics), *Logistics*, *Manufacturing*, *Food service*, *Cleaning*, *Retail*, *Transport* and *Other* for everything else. The panel lets you choose the fields you want; the default search terms cover several of them, and a setup aimed at IT only is just a matter of ticking one field. The sorting is a list of keywords, not a judgement: an unusual title can land in *Other*.
 
 ## Features
 
 - **Lombardy and Ticino in one list.** Swiss portals (jobs.ch, carriera.ch, Gi Group, Randstad, Orienta, JobScout24, Indeed, Adecco, Manpower, frontaliereticino.ch, LinkedIn) and Italian ones (Indeed Italia, LinkedIn Italia). See [Sources](#sources) for what was verified and what is not available.
 - **Your area, not a fixed list.** Pick Lombardy, Ticino or both, a radius in kilometres (straight line) around your starting point, and any extra towns or provinces. About 2,500 places are known offline.
 - **Honest locations.** A listing that only says "Lombardia" is kept apart, marked "location not precise" and given no distance. You decide whether to see it. Fully remote listings are left out unless you ask for them.
-- **Fresh or old, always visible.** Every job carries when it was published, when it was first seen and when it was last checked. A portal that is blocked never deletes what you already have: those jobs stay, marked "not re-checked". Jobs missing from a complete scan become "possibly expired", and a few of those pages are opened to see whether they are really gone.
+- **Fresh or old, always visible.** Every job carries when it was published, when it was first seen and when it was last checked. A portal that is blocked never deletes what you already have: those jobs stay, marked "not re-checked". Jobs missing from a complete scan become "possibly expired", and a few of those pages are opened to see whether they are really gone. Your filters decide what is shown, never whether a listing is still online: a saved job that the portal still lists stays "seen", even while a filter hides it.
+- **The listing text, readable.** Only the text of the listing is kept (no login walls, buttons or cookie notices), shown in paragraphs. Listings in English, German or French have a *Translate to Italian* button that works inside the browser; see [Reading and translating](#reading-and-translating).
 - **The same job, once.** The same job on several portals is merged and keeps a link to each. Two listings on the same portal, or two different companies, are never merged by accident.
 - **Seniority and contract, never a silent filter.** Junior, mid-level, senior, manager or not stated, plus the contract type. A "Senior" title is shown unless *you* switch seniors off.
 - **A salary you can trust, with its origin.** A pay written in the listing always wins over an estimate. The dashboard says whether the figure is *stated*, *read from the text*, an *AI estimate* or *not available*, shows ranges as ranges, never turns a net figure into a gross one and lists the assumptions behind every net estimate. See [Salary estimates](#salary-estimates).
@@ -104,23 +105,23 @@ flowchart LR
 
 1. Each portal has its own module in [`scrapers/`](scrapers) that opens the pages with Chromium and extracts the listings.
 2. [`job_model.py`](job_model.py) gives every job the same shape: country, region, place and how sure we are of it, seniority, contract, canonical link and every portal link.
-3. [`job_pipeline.py`](job_pipeline.py) applies your preferences and counts why each listing was excluded; [`job_dedup.py`](job_dedup.py) merges duplicates across portals in a stable order.
-4. [`job_lifecycle.py`](job_lifecycle.py) combines the scan with the cache. [`cache_store.py`](cache_store.py) saves atomically and keeps backups.
-5. Descriptions are downloaded only from the expected HTTPS hosts, in a separate browser context with no JavaScript and no saved session. A page that turns out to be an anti-bot message is never stored as a description. At most 60 new pages are opened per run; the rest wait for the next one.
-6. [`dashboard_builder.py`](dashboard_builder.py) writes `index.html`.
+3. [`job_pipeline.py`](job_pipeline.py) applies your preferences and counts why each listing was excluded; [`job_dedup.py`](job_dedup.py) merges duplicates across portals in a stable order. It returns two lists: the listings you want, and the ones that were seen but are hidden by a filter.
+4. [`job_lifecycle.py`](job_lifecycle.py) combines the scan with the cache: wanted listings are stored, and a saved listing that was seen again is refreshed even if a filter hides it now. [`cache_store.py`](cache_store.py) saves atomically and keeps backups.
+5. Descriptions are downloaded only from the expected HTTPS hosts, in a separate browser context with no JavaScript and no saved session, and only for listings your settings may show. [`description_text.py`](description_text.py) keeps the listing text and drops the rest of the page. A page that turns out to be an anti-bot message is never stored as a description. At most 60 pages are opened per run; the rest wait for the next one. A page that gives no text three times is then tried only once a week.
+6. [`dashboard_builder.py`](dashboard_builder.py) writes `index.html` with the listings that match your settings.
 
 ## Sources
 
-Checked with `python main.py --dry-run --only .` on 2026-11-08, from a normal home connection:
+Checked with `python main.py --dry-run` on 2026-11-10, from a normal home connection. A dry run opens one search page per source and looks for the element that holds the results; it proves that the portal answers and that its page is still understood, not that every listing is read.
 
-| Source | Country | Status on 2026-11-08 |
+| Source | Country | Status on 2026-11-10 |
 |---|---|---|
 | jobs.ch, carriera.ch, Gi Group, Randstad, Orienta, JobScout24, Adecco, Manpower | Switzerland | Public search pages: reached. |
 | Indeed (`indeed.ch`) | Switzerland | Reached, public mode only. |
 | frontaliereticino.ch | Switzerland | Reads the JSON index the site publishes: reached. |
-| LinkedIn (`linkedin.ch`) | Switzerland | **Blocked by Cloudflare in that check.** LinkedIn answers intermittently, so a source can work one hour and be blocked the next. A block is reported and never bypassed. |
-| Indeed Italia (`indeed.it`) | Italy | Reached; a real scan returned listings with their salary lines. |
-| LinkedIn Italia (`linkedin.it`) | Italy | Reached in some runs, blocked in others (same behaviour as above). |
+| LinkedIn (`linkedin.ch`) | Switzerland | Reached in this check, blocked on 2026-11-08. LinkedIn answers intermittently, so a source can work one hour and be blocked the next. A block is reported and never bypassed. |
+| Indeed Italia (`indeed.it`) | Italy | **Blocked in this check** by an anti-bot verification page; on 2026-11-08 a real scan returned listings with their salary lines. Same intermittent behaviour. |
+| LinkedIn Italia (`linkedin.it`) | Italy | Reached in this check; blocked in other runs (same behaviour as above). |
 | Monster | Switzerland | Disabled: the portal redirects to monster.com. |
 | subito.it | Italy | **Not used.** It answers "Access Denied" to an automated browser. |
 | infojobs.it | Italy | **Not used.** It serves an empty page to an automated browser. |
@@ -129,6 +130,15 @@ Checked with `python main.py --dry-run --only .` on 2026-11-08, from a normal ho
 A source that is blocked or empty is shown as such in `scan_report.json` and in the terminal table; coverage is never presented as complete when it is not. CAPTCHAs and login walls are never bypassed.
 
 Portals change their pages often, so run `python main.py --dry-run --only .` after installing and every now and then.
+
+## Reading and translating
+
+The dashboard is one static page. It was tested in Chromium (the engine of Chrome and Edge) at phone and desktop widths, in the light and the dark theme; it uses nothing unusual, but Firefox and Safari were not tested.
+
+- **Listing text.** Shown in paragraphs; a long text is shortened until you press *Show full text*.
+- **Translate to Italian.** Listings written in English, German or French get this button. It uses the translator built into the browser (Chrome 138 or later on a computer), which works on your device: nothing is sent anywhere. The first use downloads a language pack.
+- **When the browser cannot translate** (another browser, a phone, a failed or timed-out translation), the text stays exactly as it was and the page says so; it never claims a translation that did not happen. Only then a second button appears, *Send the text to Google Translate*. Pressing it opens Google Translate in a new tab with the start of the listing text in the address: that text leaves your computer, and only when you press that button.
+- The button was tried with the real translator in Chrome 157 on Windows (2026-11-10), on a dashboard opened as a local file: English, German and French listings were translated on the device and the original text came back with *Show original*. The automated tests cannot download language packs, so they use a simulated translator, including one that fails or never answers.
 
 ## Salary estimates
 
@@ -158,7 +168,7 @@ A *net* amount written in a listing is shown as written; it is never converted t
 The AI rating is optional and **off until you switch it on** (the panel's checkbox, or `--ai` / `--reanalyze` on the command line). `OPENAI_API_KEY` in your environment is necessary but never enough on its own.
 
 - **What is sent.** Your profile text and, for each rated listing, its title, company, place and the start of its description, to OpenAI. Listing text goes in as an escaped JSON value and the model is told to treat it as untrusted data. That limits prompt injection but cannot rule it out: a listing could still try to sway the rating, so treat it as a hint.
-- **What it costs.** OpenAI bills each request (model `gpt-4o-mini`, one request per listing). The amount depends on OpenAI's current prices and on the listing length, so check your own usage page. To keep the bill predictable, one search rates at most **25 listings** by default (setting "Most listings rated per search", 1 to 200), newest first; the others wait for the next search. Listings that are possibly expired or gone are never sent, and neither are listings your filters hide.
+- **What it costs.** OpenAI bills each request (model `gpt-4o-mini`, one request per listing). The amount depends on OpenAI's current prices and on the listing length, so check your own usage page. To keep the bill predictable, one search rates at most **25 listings** by default (setting "Most listings rated per search", 1 to 200), newest first; the others wait for the next search. Listings that are possibly expired or gone are never sent, and neither are listings your filters hide or listings whose description is still expected on a next search (the rating would have to be paid again when the text arrives).
 - **Nothing is paid twice.** A rating is stored with a key made of the prompt version, the model, a fingerprint of your profile and the listing text. It is reused while all of these are unchanged and re-done when any of them changes.
 - **When the API fails.** Each request has a 10-second timeout and up to 4 attempts with growing waits on rate limits. After 3 failures in a row the run stops asking, and the remaining listings stay pending for the next run. If the credit is exhausted the run says so and stops. A malformed answer is never stored: after the attempts the listing is marked *not analyzable* and retried only with `--reanalyze`.
 - **What is checked.** Every answer must be a JSON object with a true/false verdict and plain text; text is shortened; a salary is kept only if its currency matches the country and the amount is plausible.
@@ -223,7 +233,8 @@ The scan as a whole is `success` when every searched source is `ok` or `no_resul
 
 - Each scan is merged into it: a returned listing becomes *active*; a missing one is never deleted by a single scan.
 - A listing unseen for longer than the *expiry* you set (14 days by default) becomes *possibly expired*, and a few such pages are opened to see whether they are really gone. Listings unseen for longer than the *retention* (60 days by default) are forgotten.
-- Listings that pass your area and field filters at scan time are stored. Seniority, contract and remote work can only be settled once the description is read, so they are checked again when the dashboard is built: a stored listing can be hidden by them without being deleted, and shown again if you change the filter.
+- Listings that pass your area and field filters at scan time are stored. Seniority, contract and remote work can only be settled once the description is read, so they are checked again when the dashboard is built: a stored listing can be hidden by them without being deleted, and shown again if you change the filter. A level or contract that is "not stated" hides a listing only after its text has been read; until then the listing is shown, because it never had the chance to state it.
+- Being hidden is not being gone. When you narrow a filter, the saved listings it hides are still recognised at the next scan and stay *seen in the latest scan*; no page is opened for them and the AI never rates them. A listing that was never stored and is hidden by a filter is not added (one portal alone lists more than a thousand jobs outside any single search area).
 - Every save writes a temporary file and replaces the cache in one step. The cache left by the previous run is kept as `jobs_cache.json.bak`; a cache written by an older version is also kept once as `jobs_cache.json.pre-v2.bak`.
 - A cache file that cannot be read stops the run instead of being overwritten.
 
@@ -272,7 +283,8 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 | [`startup_config.py`](startup_config.py), [`preferences.py`](preferences.py) | Reading, validating, migrating and saving `user_settings.json`; what the user wants. |
 | [`geo.py`](geo.py), `data/places.json` | Places in Lombardy and Ticino, location certainty and the search area. Data: GeoNames (CC BY 4.0), built by `tools/build_places.py`. |
 | [`job_model.py`](job_model.py), [`job_classifier.py`](job_classifier.py), [`work_mode.py`](work_mode.py), [`job_filter.py`](job_filter.py) | One shape for every job; seniority, contract, remote/hybrid and field. |
-| [`job_pipeline.py`](job_pipeline.py), [`job_dedup.py`](job_dedup.py) | Filtering with reasons and de-duplication. |
+| [`description_text.py`](description_text.py) | Keeps the text of a listing and removes login walls, buttons and cookie notices. |
+| [`job_pipeline.py`](job_pipeline.py), [`job_dedup.py`](job_dedup.py) | Filtering with reasons (wanted listings apart from seen-but-hidden ones) and de-duplication. |
 | [`job_lifecycle.py`](job_lifecycle.py), [`job_status.py`](job_status.py), [`cache_store.py`](cache_store.py) | Freshness, expiry and safe cache storage. |
 | [`salary_extractor.py`](salary_extractor.py), [`salary_resolver.py`](salary_resolver.py) | Reading written salaries and choosing which one to show. |
 | [`italian_tax.py`](italian_tax.py), [`salary_italy.py`](salary_italy.py), [`salary_calculator.py`](salary_calculator.py), [`fx_rates.py`](fx_rates.py) | Tax rules, net pay estimates and the exchange rate. |
@@ -280,6 +292,7 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 | [`ai_analyzer.py`](ai_analyzer.py) | Optional AI rating and its cache keys. |
 | [`dashboard_builder.py`](dashboard_builder.py), [`dashboard_template/`](dashboard_template) | Dashboard generation; the page, its CSS and its script, joined into one `index.html`. |
 | [`scrapers/`](scrapers) | One module per portal, plus browser setup, sessions, block detection and the scan report. |
+| [`tools/`](tools) | `build_places.py` rebuilds the place data; `make_screenshots.py` redraws the pictures in `docs/` from invented listings. |
 | [`tests/`](tests) | Automated tests. |
 
 ## Development
@@ -292,9 +305,11 @@ python -m ruff check .
 
 `requirements.txt` pins the versions the tests run against and `requirements-dev.txt` adds the tools. Ruff checks for errors, likely bugs and the security rules of bandit.
 
-The tests never contact the portals and need no browser. They cover places and locations, filtering and exclusion reasons (also after the description is read), de-duplication, freshness and the cache, scan completeness and exit codes, the one-scan lock, salary reading and estimates, the exchange rate, settings and their migration, the AI cache (keys, limits, invalidation, malformed answers, outages), the panel, the dashboard, security (hostile markup, the CSP, allowed hosts, injection), retries, page loops and the report. Scrapers are tested with simulated pages, so they prove the logic around the portals, not that a portal's markup is unchanged: use `python main.py --dry-run --only .` for that.
+The tests never contact the portals. Most need no browser; the ones named `test_*_browser.py` open the generated dashboard (search, filters, sorting, themes, keyboard, hostile and very long text, the translate buttons) and the description request filter in a real Chromium, and are skipped on a machine where `python -m playwright install chromium` was not run. The tests cover places and locations, filtering and exclusion reasons (also after the description is read), de-duplication, freshness and the cache, scan completeness and exit codes, the one-scan lock, salary reading and estimates, the exchange rate, settings and their migration, the AI cache (keys, limits, invalidation, malformed answers, outages), the panel, the dashboard, security (hostile markup, the CSP, allowed hosts, injection), retries, page loops and the report. Scrapers are tested with simulated pages, so they prove the logic around the portals, not that a portal's markup is unchanged: use `python main.py --dry-run --only .` for that.
 
-GitHub Actions runs the linter and the tests on Python 3.10 and 3.12 (Ubuntu) and 3.12 (Windows), and a separate job audits the pinned dependencies for known vulnerabilities. Dependabot proposes updates weekly.
+GitHub Actions runs the linter and the tests on Python 3.10 and 3.12 (Ubuntu) and 3.12 (Windows). A separate job installs Chromium and runs the browser tests with `JOBSCRAPER_REQUIRE_BROWSER=1`, which turns a missing browser into a failure instead of a skip, and another job audits the pinned dependencies for known vulnerabilities. Dependabot proposes updates weekly.
+
+The pictures in `docs/` come from `python tools/make_screenshots.py`, which draws the dashboard and the panel from invented listings only.
 
 Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to set up, how to add a new source and what a good pull request looks like.
 
@@ -304,7 +319,13 @@ Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to se
 - LinkedIn and some other portals block repeated automated requests. Run searches a few hours apart and read the status column.
 - Some portals show the salary only on the detail page or not at all; then the salary is "not available" unless the AI is on.
 - Only listings with a place that can be matched to Lombardy or Ticino are placed on the map of distances. Places outside those two regions are not known.
-- Only one search runs at a time per folder. A second one (another panel, the command line or a scheduled task) stops with exit code `3`. If a run was killed, its lock is recognised as stale and replaced automatically.
+- Only one search runs at a time per folder. A second one (another panel, the command line or a scheduled task) stops with exit code `3`. If a run was killed, its lock is recognised as stale and replaced automatically: the lock names its process and when that process started, so a lock is never taken from a search that is still running, however long it takes. If the system cannot tell (rare), the message says to delete `.jobscraper.lock` by hand.
+- The panel starts a search but has no stop button: close the search from the Task Manager (or `kill`) if you need to; the next run recovers by itself.
+- If you change the search terms, saved listings that the new terms no longer find become *possibly expired* after a complete scan, and a few are re-checked on their own page at each run.
+- A portal can serve its login page instead of a listing (LinkedIn does, at times). That listing stays without text and is tried again on the next runs, then once a week.
+- A listing whose page never gives its text (three failed attempts) or whose portal is blocked is rated by the AI from the title alone; if the description arrives later, the rating is made again and billed again.
+- Translation covers English, German and French listings only, and needs a browser with a built-in translator (see [Reading and translating](#reading-and-translating)).
+- On a phone the filters come before the listings and take most of the first screen.
 - Distances are straight-line estimates. The portals' own "near me" radius can differ, and a portal may ignore the radius for some searches.
 - The tax and salary figures are estimates (see [Salary estimates](#salary-estimates)).
 

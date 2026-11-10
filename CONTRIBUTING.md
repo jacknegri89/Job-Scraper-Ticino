@@ -20,7 +20,9 @@ python -m pytest -q
 python -m ruff check .
 ```
 
-The tests never contact a portal. Two of them start a local server and a real Chromium to prove that redirects to other hosts are refused; they are skipped when Chromium is not installed. To check the live portals, run `python main.py --dry-run --only .`.
+The tests never contact a portal. The files named `tests/test_*_browser.py` use a real Chromium (the dashboard's search, filters and translate buttons, and the proof that redirects to other hosts are refused). They are skipped when Chromium is not installed; the CI job "Browser tests" sets `JOBSCRAPER_REQUIRE_BROWSER=1`, which makes a missing browser a failure. Use the `browser` fixture of `tests/conftest.py` in a new browser test and add its file to that job in `.github/workflows/ci.yml` (a test reminds you). To check the live portals, run `python main.py --dry-run --only .`.
+
+After a change to the dashboard or the panel, redraw the pictures in `docs/` with `python tools/make_screenshots.py`. It uses invented listings only: never publish a screenshot of your own dashboard.
 
 ## A scraper stopped working
 

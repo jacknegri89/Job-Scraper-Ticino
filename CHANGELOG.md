@@ -24,6 +24,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - `scrapers/pagination.py`: a shared page loop that keeps the listings already read when a later page fails and reports blocks and login walls.
 - `run_scheduled.bat` for Windows Task Scheduler, using the project's `.venv`, writing `scraper.log` and passing the exit code on.
 - `requirements-dev.txt`, pinned dependencies, Dependabot, a Windows test job, a dependency audit job and the security rules of bandit in the lint step.
+- A CI job that installs Chromium and runs the browser tests; there a missing browser is a failure, not a skip. New browser tests for the dashboard's search, filters, sorting, themes and keyboard use.
+- `tools/make_screenshots.py` redraws the pictures in `docs/` from invented listings only.
 
 ### Changed
 - The dashboard is redesigned for reading: system fonts at 16 px, sentence-case labels, plain cards, one green for actions, no decoration. Descriptions are shown in paragraphs instead of one block.
@@ -51,6 +53,18 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - Removed four unused functions.
 
 ### Fixed
+- A saved listing that the portal still showed was marked "possibly expired" when the current filters (field, seniority, contract, area) hid it, because only the wanted listings were compared with the cache. Every listing seen in a scan now counts as seen; the filters decide only what is shown, what gets a description and what the AI rates.
+- With a seniority or contract filter that leaves out "Not stated", every listing whose description had not been read yet was hidden from the dashboard (on a real cache, 276 of 327). "Not stated" now hides a listing only after its text has been read, as the scan already did.
+- The AI no longer rates a listing whose description is still expected on a next search; that rating would have been paid again when the text arrived.
+- The search box could not find text with `&`, quotes, apostrophes or `<`, such as "AT&T" or "O'Brien": the search text was escaped twice. It is escaped once; the markup is as safe as before.
+- "Sales Developer" and similar sales titles were counted as software jobs: the rule for the word "sales" held two invisible control characters instead of word boundaries, so it never matched.
+- A lock older than 12 hours was taken over even while its search was still running (a computer asleep overnight was enough), so two searches could write the same files. A lock is now released only when its process is gone or the process number belongs to another program; age is no longer a reason.
+- A listing whose text contained "not found" (for example "fix 404 Not Found errors") could be marked as removed when its page was re-checked. Only the wording of a removed-listing page counts now.
+- An anti-bot check page with a translated title ("Ci siamo quasi…") was reported as a changed page (`selector_broken`) instead of `blocked`.
+- A listing page that keeps giving no text (a login wall, a block) was opened again on every run. After three failures it is tried once a week, and pages never opened come first.
+- A job found on two portals lost its link to the second one when that portal was blocked or not scanned in a run. The link is kept until that portal is read completely and no longer lists the job.
+- A failed description download no longer erases a contact address found earlier.
+- If the last portal closed the browser, the description pages are opened in a new one instead of all failing.
 - Login walls, buttons and cookie notices (LinkedIn's sign-in form above all) were stored and shown as the listing text. The text is now read from the listing's own part of the page and cleaned; text that still carries a sign-in form is dropped and read again.
 - Seniority, contract type and remote work were guessed from that page furniture (for example "Internship"); they now come from the listing text only.
 - Categories: fashion and product developers, sales roles ("Venditore IA") and real-estate developers were counted as software jobs; PLC and HMI programming is now "Electronics & machining".

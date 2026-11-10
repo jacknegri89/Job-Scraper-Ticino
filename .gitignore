@@ -243,6 +243,7 @@ scraper.log.old
 
 # Local planning artifacts for agents; not needed to run the scraper
 .planning/
+docs/superpowers/
 
 # Lock held while a scan is running
 .jobscraper.lock
